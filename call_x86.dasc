@@ -1,0 +1,397 @@
+|.arch x86
+|.actionlist build_actionlist
+|.globalnames globnames
+
+|.define FCARG2, edx
+|.define FCARG1, ecx
+|.define FCRET, eax
+
+|.define FCRET_H, edx // for int64_t returns
+|.define FCRET_L, eax
+
+
+void compile_globals(jit_t* jit, lua_State* L)
+{
+    jit_t* Dst = jit;
+    dasm_setup(Dst, build_actionlist);
+
+    /* stack layout whilst in c function
+     * lua_State* L
+     * old EIP
+     * old EBP <- EBP
+     * int idx (for vararg)
+     * 
+     * Note: since the return code uses EBP to reset the stack pointer, we
+     * don't have to track the amount of stack space used. It also means we
+     * can handle stdcall and cdecl with the same code.
+     */
+    |.define L_ARG, dword [ebp+8]
+    |.define IDX_VAR, dword [ebp-4]
+
+    |.macro .setup_stack
+    | push ebp
+    | mov ebp, esp
+    | push eax // dummy for IDX_ARG
+    |.endmacro
+
+    |.macro .return
+    | mov esp, ebp
+    | pop ebp
+    | ret
+    |.endmacro
+    
+    |.macro .get_errno // note trashes registers
+    | call &GetLastError
+    | mov dword [&jit->last_errno], eax
+    |.endmacro
+
+    |->return_void:
+    |.get_errno
+    | mov eax, 0
+    |.return
+    
+    |->return_int:
+    | sub esp, 4 // for fstp
+    | push eax
+    | fild dword [esp]
+    | fstp qword [esp]
+    | push L_ARG
+    |.get_errno
+    | call &lua_pushnumber
+    | mov eax, 1
+    |.return
+
+    |->return_bool:
+    | push eax
+    | push L_ARG
+    |.get_errno
+    | call &lua_pushboolean
+    | mov eax, 1
+    |.return
+
+    |->return_uint:
+    | push eax
+    | push L_ARG
+    |.get_errno
+    | call &push_uint
+    | mov eax, 1
+    |.return
+
+    |->return_double:
+    | sub esp, 8 // for fstp
+    | fstp qword [esp]
+    | push L_ARG
+    |.get_errno
+    | call &lua_pushnumber
+    | mov eax, 1
+    |.return
+
+    |->return_pointer: // val, mbr_ct, and ct_usr are already on stack
+    | push L_ARG
+    |.get_errno
+    | call &push_cdata
+    | add esp, 12
+    | pop ecx
+    | // *(void**) cdata = val
+    | mov dword [eax], ecx
+    | mov eax, 1
+    |.return
+
+    |->return_uint64: // val, mbr_ct, and ct_usr are already on stack
+    | push L_ARG
+    |.get_errno
+    | call &push_cdata
+    | add esp, 12
+    | // *(uint64_t*) cdata = val
+    | pop ecx // low
+    | pop edx // high
+    | mov dword [FCRET], ecx
+    | mov dword [FCRET+4], edx
+    | mov eax, 1
+    |.return
+
+    |->too_few_arguments:
+    | push &"too few arguments"
+    | push L_ARG
+    | call &luaL_error // does not return
+
+    |->too_many_arguments:
+    | push &"too many arguments"
+    | push L_ARG
+    | call &luaL_error // does not return
+
+    compile(Dst, L);
+}
+
+void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const ctype_t* ct)
+{
+    size_t i, nargs;
+    int num_upvals;
+    const ctype_t* mbr_ct;
+    jit_t* Dst = jit;
+
+    dasm_setup(Dst, build_actionlist);
+
+    lua_pushvalue(L, ct_usr);
+    ct_usr = lua_gettop(L);
+    lua_pushvalue(L, CDATA_MT_UPVAL); /* so that CDATA_MT_UPVAL works within the closure */
+    num_upvals = 2;
+
+    nargs = lua_rawlen(L, ct_usr);
+
+    if (ct->calling_convention != C_CALL && ct->calling_convention != STD_CALL) {
+        luaL_error(L, "NYI: calling convention");
+    }
+
+    |.setup_stack
+    | push L_ARG
+    | call &lua_gettop
+    | cmp eax, nargs
+    | jl ->too_few_arguments
+    
+    if (!ct->has_var_arg) {
+        | jg ->too_many_arguments
+    } else {
+        |1:
+        | cmp eax, nargs
+        | jle >9 // while IDX_VAR > nargs
+        | mov IDX_VAR, eax
+        | sub esp, 8
+        | push esp
+        | mov FCARG2, eax
+        | mov FCARG1, L_ARG
+        | call &to_vararg
+        | // to_vararg returns how many bytes were unused
+        | add esp, FCRET
+        | mov eax, IDX_VAR
+        | sub eax, 1
+        | jmp <1
+        |9:
+    }
+    
+    for (i = nargs; i > 0; i--) {
+        lua_rawgeti(L, ct_usr, i);
+        mbr_ct = (const ctype_t*) lua_touserdata(L, -1);
+        
+        if (mbr_ct->pointers) {
+            lua_getuservalue(L, -1);
+            num_upvals += 2;
+            | push mbr_ct
+            | push lua_upvalueindex(num_upvals)
+            | mov FCARG2, i
+            | mov FCARG1, L_ARG
+            | call &to_typed_pointer
+            | push FCRET
+        } else {
+            switch (mbr_ct->type) {
+            case FUNCTION_TYPE:
+                lua_getuservalue(L, -1);
+                num_upvals += 2;
+                | push mbr_ct
+                | push lua_upvalueindex(num_upvals)
+                | mov FCARG2, i
+                | mov FCARG1, L_ARG
+                | call &to_typed_function
+                | push FCRET
+                break;
+
+            case ENUM_TYPE:
+                lua_getuservalue(L, -1);
+                num_upvals++;
+                | push lua_upvalueindex(num_upvals)
+                | mov FCARG2, i
+                | mov FCARG1, L_ARG
+                | call &to_enum
+                | push FCRET
+                lua_remove(L, -2); /* remove mbr_ct */
+                break;
+
+            case INT8_TYPE:
+                | mov FCARG2, i
+                | mov FCARG1, L_ARG
+                | call &to_int32
+                | movsx FCRET, al
+                | push FCRET
+                lua_pop(L, 1);
+                break;
+
+            case UINT8_TYPE:
+                | mov FCARG2, i
+                | mov FCARG1, L_ARG
+                | call &to_uint32
+                | movzx FCRET, al
+                | push FCRET
+                lua_pop(L, 1);
+                break;
+
+            case INT16_TYPE:
+                | mov FCARG2, i
+                | mov FCARG1, L_ARG
+                | call &to_int32
+                | movsx FCRET, ax
+                | push FCRET
+                lua_pop(L, 1);
+                break;
+
+            case UINT16_TYPE:
+                | mov FCARG2, i
+                | mov FCARG1, L_ARG
+                | call &to_uint32
+                | movzx FCRET, ax
+                | push FCRET
+                lua_pop(L, 1);
+                break;
+
+            case INT32_TYPE:
+                | mov FCARG2, i
+                | mov FCARG1, L_ARG
+                | call &to_int32
+                | push FCRET
+                lua_pop(L, 1);
+                break;
+
+            case UINT32_TYPE:
+                | mov FCARG2, i
+                | mov FCARG1, L_ARG
+                | call &to_uint32
+                | push FCRET
+                lua_pop(L, 1);
+                break;
+
+            case UINTPTR_TYPE:
+                | mov FCARG2, i
+                | mov FCARG1, L_ARG
+                | call &to_uintptr
+                | push FCRET
+                lua_pop(L, 1);
+                break;
+            
+            case INT64_TYPE:
+                | mov FCARG2, i
+                | mov FCARG1, L_ARG
+                | call &to_int64
+                | push FCRET_H
+                | push FCRET_L
+                lua_pop(L, 1);
+                break;
+            
+            case UINT64_TYPE:
+                | mov FCARG2, i
+                | mov FCARG1, L_ARG
+                | call &to_uint64
+                | push FCRET_H
+                | push FCRET_L
+                lua_pop(L, 1);
+                break;
+
+            case DOUBLE_TYPE:
+                | mov FCARG2, i
+                | mov FCARG1, L_ARG
+                | call &to_double
+                | sub esp, 8
+                | fstp qword [esp]
+                lua_pop(L, 1);
+                break;
+
+            case FLOAT_TYPE:
+                | mov FCARG2, i
+                | mov FCARG1, L_ARG
+                | call &to_double
+                | sub esp, 4
+                | fstp dword [esp]
+                lua_pop(L, 1);
+                break;
+
+            default:
+                luaL_error(L, "NYI: call arg type");
+            }
+        }
+    }
+
+    | push dword [&jit->last_errno]
+    | call &SetLastError
+    | call &func
+
+    lua_rawgeti(L, ct_usr, 0);
+    mbr_ct = (const ctype_t*) lua_touserdata(L, -1);
+
+    if (mbr_ct->pointers || mbr_ct->type == UINTPTR_TYPE) {
+        lua_getuservalue(L, -1);
+        num_upvals += 2;
+        | push eax
+        | push mbr_ct
+        | push lua_upvalueindex(num_upvals)
+        | jmp ->return_pointer
+    } else {
+        switch (mbr_ct->type) {
+        case VOID_TYPE:
+            | jmp ->return_void
+            lua_pop(L, 1);
+            break;
+
+        case BOOL_TYPE:
+            | jmp ->return_bool
+            lua_pop(L, 1);
+            break;
+
+        case INT8_TYPE:
+            | movsx eax, al
+            | jmp ->return_int
+            lua_pop(L, 1);
+            break;
+
+        case INT16_TYPE:
+            | movsx eax, ax
+            | jmp ->return_int
+            lua_pop(L, 1);
+            break;
+
+        case UINT8_TYPE:
+            | movzx eax, al
+            | jmp ->return_int
+            lua_pop(L, 1);
+            break;
+
+        case UINT16_TYPE:
+            | movzx eax, ax
+            | jmp ->return_int
+            lua_pop(L, 1);
+            break;
+
+        case INT32_TYPE:
+        case ENUM_TYPE:
+            | jmp ->return_int
+            lua_pop(L, 1);
+            break;
+
+        case UINT32_TYPE:
+            | jmp ->return_uint
+            lua_pop(L, 1);
+            break;
+
+        case DOUBLE_TYPE:
+        case FLOAT_TYPE:
+            | jmp ->return_double
+            lua_pop(L, 1);
+            break;
+
+        case INT64_TYPE:
+        case UINT64_TYPE:
+            lua_getuservalue(L, -1);
+            num_upvals += 2;
+            | push edx // high
+            | push eax // low
+            | push mbr_ct
+            | push lua_upvalueindex(num_upvals)
+            | jmp ->return_uint64
+            break;
+
+        default:
+            luaL_error(L, "NYI: call return type");
+        }
+    }
+
+    assert(lua_gettop(L) == ct_usr + num_upvals - 1);
+    lua_pushcclosure(L, (lua_CFunction) compile(Dst, L), num_upvals);
+}
+

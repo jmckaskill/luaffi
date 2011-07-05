@@ -1,0 +1,8 @@
+call_*.h
+*.dll
+*.exp
+*.lib
+*.pdb
+*.ilk
+.*.swp
+*.user
