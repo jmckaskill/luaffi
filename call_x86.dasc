@@ -15,26 +15,14 @@ void compile_globals(jit_t* jit, lua_State* L)
     jit_t* Dst = jit;
     dasm_setup(Dst, build_actionlist);
 
-    /* stack layout whilst in c function
-     * lua_State* L
-     * old EIP
-     * old EBP <- EBP
-     * int idx (for vararg)
-     * 
-     * Note: since the return code uses EBP to reset the stack pointer, we
+    /* Note: since the return code uses EBP to reset the stack pointer, we
      * don't have to track the amount of stack space used. It also means we
      * can handle stdcall and cdecl with the same code.
      */
-    |.define L_ARG, dword [ebp+8]
-    |.define IDX_VAR, dword [ebp-4]
-
-    |.macro .setup_stack
-    | push ebp
-    | mov ebp, esp
-    | push eax // dummy for IDX_ARG
-    |.endmacro
+    |.define L_ARG, ebx
 
     |.macro .return
+    | mov ebx, [ebp-4]
     | mov esp, ebp
     | pop ebp
     | ret
@@ -51,76 +39,96 @@ void compile_globals(jit_t* jit, lua_State* L)
     |.return
     
     |->return_int:
-    | sub esp, 4 // for fstp
-    | push eax
+    | mov [esp], eax
     | fild dword [esp]
-    | fstp qword [esp]
-    | push L_ARG
+    | fstp qword [esp+4]
+    | mov [esp], L_ARG
     |.get_errno
     | call &lua_pushnumber
     | mov eax, 1
     |.return
 
     |->return_bool:
-    | push eax
-    | push L_ARG
+    | mov [esp+4], eax
+    | mov [esp], L_ARG
     |.get_errno
     | call &lua_pushboolean
     | mov eax, 1
     |.return
 
     |->return_uint:
-    | push eax
-    | push L_ARG
+    | mov [esp+4], eax
+    | mov [esp], L_ARG
     |.get_errno
     | call &push_uint
     | mov eax, 1
     |.return
 
     |->return_double:
-    | sub esp, 8 // for fstp
-    | fstp qword [esp]
-    | push L_ARG
+    | fstp qword [esp+4]
+    | mov [esp], L_ARG
     |.get_errno
     | call &lua_pushnumber
     | mov eax, 1
     |.return
 
     |->return_pointer: // val, mbr_ct, and ct_usr are already on stack
-    | push L_ARG
     |.get_errno
     | call &push_cdata
-    | add esp, 12
-    | pop ecx
+    | mov ecx, [esp+12]
     | // *(void**) cdata = val
-    | mov dword [eax], ecx
+    | mov [eax], ecx
     | mov eax, 1
     |.return
 
     |->return_uint64: // val, mbr_ct, and ct_usr are already on stack
-    | push L_ARG
     |.get_errno
     | call &push_cdata
-    | add esp, 12
     | // *(uint64_t*) cdata = val
-    | pop ecx // low
-    | pop edx // high
-    | mov dword [FCRET], ecx
-    | mov dword [FCRET+4], edx
+    | mov edx, [esp+20]
+    | mov ecx, [esp+16]
+    | mov [eax+4], edx
+    | mov [eax], ecx
     | mov eax, 1
     |.return
 
     |->too_few_arguments:
-    | push &"too few arguments"
-    | push L_ARG
+    | mov dword [esp+4], &"too few arguments"
+    | mov [esp], L_ARG
     | call &luaL_error // does not return
 
     |->too_many_arguments:
-    | push &"too many arguments"
-    | push L_ARG
+    | mov dword [esp+4], &"too many arguments"
+    | mov [esp], L_ARG
     | call &luaL_error // does not return
 
     compile(Dst, L);
+}
+
+int x86_stack_required(lua_State* L, int usr)
+{
+    size_t i;
+    size_t argn = lua_rawlen(L, usr);
+    int ret = 0;
+    for (i = 1; i <= argn; i++) {
+        const ctype_t* ct;
+        lua_rawgeti(L, usr, i);
+        ct = (const ctype_t*) lua_touserdata(L, -1);
+
+        if (ct->pointers) {
+            ret += 4;
+        } else if (ct->type == DOUBLE_TYPE || ct->type == UINT64_TYPE || ct->type == INT64_TYPE) {
+            ret += 8;
+        } else if (ct->type == STRUCT_TYPE || ct->type == UNION_TYPE) {
+            luaL_error(L, "NYI - structs as arguments");
+        } else {
+            ret += 4;
+        }
+
+        lua_pop(L, 1);
+    }
+
+    return ret;
 }
 
 void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const ctype_t* ct)
@@ -129,6 +137,8 @@ void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const 
     int num_upvals;
     const ctype_t* mbr_ct;
     jit_t* Dst = jit;
+    int stack_required;
+    int stack_off;
 
     dasm_setup(Dst, build_actionlist);
 
@@ -143,32 +153,38 @@ void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const 
         luaL_error(L, "NYI: calling convention");
     }
 
-    |.setup_stack
-    | push L_ARG
+    | push ebp
+    | mov ebp, esp
+    | push ebx
+    | mov L_ARG, [ebp+8]
+    | push L_ARG // also realigns to 16 (L_ARG, edi, ebp, eip)
     | call &lua_gettop
     | cmp eax, nargs
     | jl ->too_few_arguments
     
+    stack_required = x86_stack_required(L, ct_usr);
+    stack_off = stack_required + 16;
+
     if (!ct->has_var_arg) {
         | jg ->too_many_arguments
+        | sub esp, ALIGN(stack_required, 15) + 16 // include extra space for to_*
     } else {
-        |1:
-        | cmp eax, nargs
-        | jle >9 // while IDX_VAR > nargs
-        | mov IDX_VAR, eax
-        | sub esp, 8
-        | push esp
-        | mov FCARG2, eax
-        | mov FCARG1, L_ARG
-        | call &to_vararg
-        | // to_vararg returns how many bytes were unused
-        | add esp, FCRET
-        | mov eax, IDX_VAR
-        | sub eax, 1
-        | jmp <1
-        |9:
+        /* allocate enough stack space to cover the worst case (use 16 to keep
+         * the stack aligned)
+         */
+        | mov ecx, eax
+        | shl ecx, 4 // 16 bytes per argument
+        | sub esp, ecx
+        | sub esp, ALIGN(stack_required, 15) + 16 // include extra space for to_* and unpack_varargs
+        | mov ecx, esp
+        | add ecx, stack_required + 16
+        | mov dword [esp+12], ecx
+        | mov dword [esp+8], eax
+        | mov dword [esp+4], nargs + 1
+        | mov dword [esp], L_ARG
+        | call &unpack_varargs
     }
-    
+
     for (i = nargs; i > 0; i--) {
         lua_rawgeti(L, ct_usr, i);
         mbr_ct = (const ctype_t*) lua_touserdata(L, -1);
@@ -176,129 +192,141 @@ void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const 
         if (mbr_ct->pointers) {
             lua_getuservalue(L, -1);
             num_upvals += 2;
-            | push mbr_ct
-            | push lua_upvalueindex(num_upvals)
-            | mov FCARG2, i
-            | mov FCARG1, L_ARG
+            stack_off -= 4;
+            | mov dword [esp+12], mbr_ct
+            | mov dword [esp+8], lua_upvalueindex(num_upvals)
+            | mov dword [esp+4], i
+            | mov dword [esp], L_ARG
             | call &to_typed_pointer
-            | push FCRET
+            | mov [esp+stack_off], eax
         } else {
             switch (mbr_ct->type) {
             case FUNCTION_TYPE:
                 lua_getuservalue(L, -1);
                 num_upvals += 2;
-                | push mbr_ct
-                | push lua_upvalueindex(num_upvals)
-                | mov FCARG2, i
-                | mov FCARG1, L_ARG
+                stack_off -= 4;
+                | mov dword [esp+12], mbr_ct
+                | mov dword [esp+8], lua_upvalueindex(num_upvals)
+                | mov dword [esp+4], i
+                | mov dword [esp], L_ARG
                 | call &to_typed_function
-                | push FCRET
+                | mov [esp+stack_off], eax
                 break;
 
             case ENUM_TYPE:
                 lua_getuservalue(L, -1);
                 num_upvals++;
-                | push lua_upvalueindex(num_upvals)
-                | mov FCARG2, i
-                | mov FCARG1, L_ARG
+                stack_off -= 4;
+                | mov dword [esp+8], lua_upvalueindex(num_upvals)
+                | mov dword [esp+4], i
+                | mov dword [esp], L_ARG
                 | call &to_enum
-                | push FCRET
+                | mov [esp+stack_off], eax
                 lua_remove(L, -2); /* remove mbr_ct */
                 break;
 
             case INT8_TYPE:
-                | mov FCARG2, i
-                | mov FCARG1, L_ARG
+                stack_off -= 4;
+                | mov dword [esp+4], i
+                | mov dword [esp], L_ARG
                 | call &to_int32
-                | movsx FCRET, al
-                | push FCRET
+                | movsx eax, al
+                | mov [esp+stack_off], eax
                 lua_pop(L, 1);
                 break;
 
             case UINT8_TYPE:
-                | mov FCARG2, i
-                | mov FCARG1, L_ARG
+                stack_off -= 4;
+                | mov dword [esp+4], i
+                | mov dword [esp], L_ARG
                 | call &to_uint32
-                | movzx FCRET, al
-                | push FCRET
+                | movzx eax, al
+                | mov [esp+stack_off], eax
                 lua_pop(L, 1);
                 break;
 
             case INT16_TYPE:
-                | mov FCARG2, i
-                | mov FCARG1, L_ARG
+                stack_off -= 4;
+                | mov dword [esp+4], i
+                | mov dword [esp], L_ARG
                 | call &to_int32
-                | movsx FCRET, ax
-                | push FCRET
+                | movsx eax, ax
+                | mov [esp+stack_off], eax
                 lua_pop(L, 1);
                 break;
 
             case UINT16_TYPE:
-                | mov FCARG2, i
-                | mov FCARG1, L_ARG
+                stack_off -= 4;
+                | mov dword [esp+4], i
+                | mov dword [esp], L_ARG
                 | call &to_uint32
-                | movzx FCRET, ax
-                | push FCRET
+                | movzx eax, ax
+                | mov [esp+stack_off], eax
                 lua_pop(L, 1);
                 break;
 
             case INT32_TYPE:
-                | mov FCARG2, i
-                | mov FCARG1, L_ARG
+                stack_off -= 4;
+                | mov dword [esp+4], i
+                | mov dword [esp], L_ARG
                 | call &to_int32
-                | push FCRET
+                | mov [esp+stack_off], eax
                 lua_pop(L, 1);
                 break;
 
             case UINT32_TYPE:
-                | mov FCARG2, i
-                | mov FCARG1, L_ARG
+                stack_off -= 4;
+                | mov dword [esp+4], i
+                | mov dword [esp], L_ARG
                 | call &to_uint32
-                | push FCRET
+                | mov [esp+stack_off], eax
                 lua_pop(L, 1);
                 break;
 
             case UINTPTR_TYPE:
-                | mov FCARG2, i
-                | mov FCARG1, L_ARG
+                stack_off -= 4;
+                | mov dword [esp+4], i
+                | mov dword [esp], L_ARG
                 | call &to_uintptr
-                | push FCRET
+                | mov [esp+stack_off], eax
                 lua_pop(L, 1);
                 break;
             
             case INT64_TYPE:
-                | mov FCARG2, i
-                | mov FCARG1, L_ARG
+                stack_off -= 8;
+                | mov dword [esp+4], i
+                | mov dword [esp], L_ARG
                 | call &to_int64
-                | push FCRET_H
-                | push FCRET_L
+                | mov [esp+stack_off+4], FCRET_H
+                | mov [esp+stack_off], FCRET_L
                 lua_pop(L, 1);
                 break;
             
             case UINT64_TYPE:
-                | mov FCARG2, i
-                | mov FCARG1, L_ARG
+                stack_off -= 8;
+                | mov dword [esp+4], i
+                | mov dword [esp], L_ARG
                 | call &to_uint64
-                | push FCRET_H
-                | push FCRET_L
+                | mov [esp+stack_off+4], FCRET_H
+                | mov [esp+stack_off], FCRET_L
                 lua_pop(L, 1);
                 break;
 
             case DOUBLE_TYPE:
-                | mov FCARG2, i
-                | mov FCARG1, L_ARG
+                stack_off -= 8;
+                | mov dword [esp+4], i
+                | mov dword [esp], L_ARG
                 | call &to_double
-                | sub esp, 8
-                | fstp qword [esp]
+                | fstp qword [esp+stack_off]
                 lua_pop(L, 1);
                 break;
 
             case FLOAT_TYPE:
-                | mov FCARG2, i
-                | mov FCARG1, L_ARG
+                stack_off -= 4;
+                | mov dword [esp+4], i
+                | mov dword [esp], L_ARG
                 | call &to_double
-                | sub esp, 4
-                | fstp dword [esp]
+                | fstp dword [esp+stack_off]
                 lua_pop(L, 1);
                 break;
 
@@ -308,9 +336,18 @@ void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const 
         }
     }
 
-    | push dword [&jit->last_errno]
+    | mov eax, [&jit->last_errno]
+    | mov [esp], eax
     | call &SetLastError
+#ifdef _WIN32
+    | add esp, 12 // SetLastError will have already popped 4
+#else
+    | add esp, 16
+#endif
     | call &func
+    | // stack is in an undefined state at this point so we need to realign it
+    | and esp, ~15
+    | sub esp, 32 // allocate some space for the push functions
 
     lua_rawgeti(L, ct_usr, 0);
     mbr_ct = (const ctype_t*) lua_touserdata(L, -1);
@@ -318,12 +355,24 @@ void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const 
     if (mbr_ct->pointers || mbr_ct->type == UINTPTR_TYPE) {
         lua_getuservalue(L, -1);
         num_upvals += 2;
-        | push eax
-        | push mbr_ct
-        | push lua_upvalueindex(num_upvals)
+        | mov [esp+12], eax
+        | mov dword [esp+8], mbr_ct
+        | mov dword [esp+4], lua_upvalueindex(num_upvals)
+        | mov [esp], L_ARG
         | jmp ->return_pointer
     } else {
         switch (mbr_ct->type) {
+        case INT64_TYPE:
+        case UINT64_TYPE:
+            num_upvals++;
+            | mov [esp+20], edx // high
+            | mov [esp+16], eax // low
+            | mov dword [esp+8], mbr_ct
+            | // ct_usr is unused
+            | mov [esp], L_ARG
+            | jmp ->return_uint64
+            break;
+
         case VOID_TYPE:
             | jmp ->return_void
             lua_pop(L, 1);
@@ -373,17 +422,6 @@ void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const 
         case FLOAT_TYPE:
             | jmp ->return_double
             lua_pop(L, 1);
-            break;
-
-        case INT64_TYPE:
-        case UINT64_TYPE:
-            lua_getuservalue(L, -1);
-            num_upvals += 2;
-            | push edx // high
-            | push eax // low
-            | push mbr_ct
-            | push lua_upvalueindex(num_upvals)
-            | jmp ->return_uint64
             break;
 
         default:

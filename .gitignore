@@ -6,3 +6,4 @@ call_*.h
 *.ilk
 .*.swp
 *.user
+/BuildLog.htm

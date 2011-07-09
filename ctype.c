@@ -70,8 +70,10 @@ void push_ctype(lua_State* L, int ct_usr, const ctype_t* ct)
     lua_pushvalue(L, CTYPE_MT_UPVAL);
     lua_setmetatable(L, -2);
 
-    lua_pushvalue(L, ct_usr);
-    lua_setuservalue(L, -2);
+    if (ct->type >= ENUM_TYPE) {
+        lua_pushvalue(L, ct_usr);
+        lua_setuservalue(L, -2);
+    }
 
     if (!ct->is_defined) {
         update_on_definition(L, ct_usr, -1);
@@ -102,8 +104,10 @@ void* push_cdata(lua_State* L, int ct_usr, const ctype_t* ct)
     *(ctype_t*) &cd->type = *ct;
     memset(cd+1, 0, sz);
 
-    lua_pushvalue(L, ct_usr);
-    lua_setuservalue(L, -2);
+    if (ct->type >= ENUM_TYPE) {
+        lua_pushvalue(L, ct_usr);
+        lua_setuservalue(L, -2);
+    }
 
     lua_pushvalue(L, CDATA_MT_UPVAL);
     lua_setmetatable(L, -2);

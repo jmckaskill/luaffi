@@ -21,6 +21,7 @@
 			IntermediateDirectory="$(ConfigurationName)"
 			ConfigurationType="0"
 			CharacterSet="2"
+			BuildLogFile="BuildLog.htm"
 			>
 			<Tool
 				Name="VCNMakeTool"
@@ -43,6 +44,7 @@
 			ConfigurationType="0"
 			CharacterSet="2"
 			WholeProgramOptimization="1"
+			BuildLogFile="BuildLog.htm"
 			>
 			<Tool
 				Name="VCNMakeTool"

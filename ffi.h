@@ -107,14 +107,13 @@ enum {
     CTYPE_MT_IDX = 2,
     CDATA_MT_IDX,
     CMODULE_MT_IDX,
-    WEAK_KEY_MT_IDX,
     CONSTANTS_IDX,
+    WEAK_KEY_MT_IDX,
     TYPE_IDX,
     FUNCTION_IDX,
     ABI_PARAM_IDX,
     JIT_IDX,
     GC_IDX,
-    BUILTIN_IDX,
     TO_NUMBER_IDX,
     LAST_IDX,
 };
@@ -124,14 +123,13 @@ enum {
 #define CTYPE_MT_UPVAL lua_upvalueindex(CTYPE_MT_IDX - 1)
 #define CDATA_MT_UPVAL lua_upvalueindex(CDATA_MT_IDX - 1)
 #define CMODULE_MT_UPVAL lua_upvalueindex(CMODULE_MT_IDX - 1)
-#define WEAK_KEY_MT_UPVAL lua_upvalueindex(WEAK_KEY_MT_IDX - 1)
 #define CONSTANTS_UPVAL lua_upvalueindex(CONSTANTS_IDX - 1)
+#define WEAK_KEY_MT_UPVAL lua_upvalueindex(WEAK_KEY_MT_IDX - 1)
 #define TYPE_UPVAL lua_upvalueindex(TYPE_IDX - 1)
 #define FUNCTION_UPVAL lua_upvalueindex(FUNCTION_IDX - 1)
 #define ABI_PARAM_UPVAL lua_upvalueindex(ABI_PARAM_IDX - 1)
 #define JIT_UPVAL lua_upvalueindex(JIT_IDX - 1)
 #define GC_UPVAL lua_upvalueindex(GC_IDX - 1)
-#define BUILTIN_UPVAL lua_upvalueindex(BUILTIN_IDX - 1)
 #define TO_NUMBER_UPVAL lua_upvalueindex(TO_NUMBER_IDX - 1)
 
 /* both ctype and cdata are stored as userdatas
@@ -216,17 +214,18 @@ int ffi_cdef(lua_State* L);
 void* reserve_code(jit_t* jit, size_t sz);
 void commit_code(jit_t* jit, void* p, size_t sz);
 
-double __fastcall to_double(lua_State* L, int idx);
-uint64_t __fastcall to_uint64(lua_State* L, int idx);
-int64_t __fastcall to_int64(lua_State* L, int idx);
-int32_t __fastcall to_int32(lua_State* L, int idx);
-uint32_t __fastcall to_uint32(lua_State* L, int idx);
-uintptr_t __fastcall to_uintptr(lua_State* L, int idx);
-int32_t __fastcall to_enum(lua_State* L, int idx, int to_usr);
-void* __fastcall to_typed_pointer(lua_State* L, int idx, int to_usr, const ctype_t* tt);
-function_t __fastcall to_typed_function(lua_State* L, int idx, int to_usr, const ctype_t* tt);
-int __fastcall to_vararg(lua_State* L, int idx, char* to);
+double to_double(lua_State* L, int idx);
+uint64_t to_uint64(lua_State* L, int idx);
+int64_t to_int64(lua_State* L, int idx);
+int32_t to_int32(lua_State* L, int idx);
+uint32_t to_uint32(lua_State* L, int idx);
+uintptr_t to_uintptr(lua_State* L, int idx);
+int32_t to_enum(lua_State* L, int idx, int to_usr);
+void* to_typed_pointer(lua_State* L, int idx, int to_usr, const ctype_t* tt);
+function_t to_typed_function(lua_State* L, int idx, int to_usr, const ctype_t* tt);
+void unpack_varargs(lua_State* L, int first, int last, char* to);
 
+int x86_stack_required(lua_State* L, int usr);
 void push_function(jit_t* jit, lua_State* L, function_t f, int ct_usr, const ctype_t* ct);
 void compile_globals(jit_t* jit, lua_State* L);
 
