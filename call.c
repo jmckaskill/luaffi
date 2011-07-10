@@ -1,5 +1,10 @@
 #include "ffi.h"
+
+#ifdef _WIN32
 #include <windows.h>
+#else
+#include <errno.h>
+#endif
 
 static void push_uint(lua_State* L, unsigned int val)
 { lua_pushnumber(L, val); }
@@ -28,6 +33,8 @@ static void* compile(Dst_DECL, lua_State* L)
 #ifndef _WIN32
 static int GetLastError(void)
 { return errno; }
+static void SetLastError(int err)
+{ errno = err; }
 #endif
 
 

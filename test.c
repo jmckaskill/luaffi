@@ -3,13 +3,21 @@
 #include <inttypes.h>
 
 #ifdef __cplusplus
-#define DLL extern "C" __declspec(dllexport)
+# define EXTERN_C extern "C"
 #else
-#define DLL extern __declspec(dllexport)
+# define EXTERN_C extern
+#endif
+
+#ifdef _WIN32
+#define EXPORT EXTERN_C __declspec(dllexport)
+#elif defined __GNUC__
+#define EXPORT EXTERN_C __attribute__((visibility("default")))
+#else
+#define EXPORT EXTERN_C
 #endif
 
 #define ADD(TYPE, NAME) \
-    DLL TYPE NAME(TYPE a, TYPE b); \
+    EXPORT TYPE NAME(TYPE a, TYPE b); \
     TYPE NAME(TYPE a, TYPE b) { return a + b; }
 
 ADD(int8_t, add_i8)
@@ -24,7 +32,7 @@ ADD(double, add_d)
 ADD(float, add_f)
 
 #define PRINT(TYPE, NAME, FORMAT) \
-    DLL int NAME(char* buf, TYPE val); \
+    EXPORT int NAME(char* buf, TYPE val); \
     int NAME(char* buf, TYPE val) {return sprintf(buf, "%" FORMAT, val);}
 
 PRINT(int8_t, print_i8, PRId8)
@@ -52,8 +60,8 @@ struct d_align1 {
 };
 #pragma pack(pop)
 
-DLL int print_d_align(char* buf, struct d_align* p);
-DLL int print_d_align1(char* buf, struct d_align1* p);
+EXPORT int print_d_align(char* buf, struct d_align* p);
+EXPORT int print_d_align1(char* buf, struct d_align1* p);
 
 int print_d_align(char* buf, struct d_align* p)
 {return sprintf(buf, "%g", p->d);}

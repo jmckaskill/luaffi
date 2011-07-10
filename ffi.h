@@ -79,14 +79,14 @@ typedef struct {
     size_t off;
 } page_t;
 
-typedef struct jit_t {
+struct jit_t {
     int32_t last_errno;
     dasm_State* ctx;
     size_t pagenum;
     page_t* pages;
     size_t align_page_size;
     void** globals;
-} jit_t;
+};
 
 #define ALIGN(PTR, MASK) \
   (( ((uintptr_t) (PTR)) + ((uintptr_t) (MASK)) ) & (~ ((uintptr_t) (MASK)) ))
@@ -94,10 +94,10 @@ typedef struct jit_t {
 
 /* cdata_t/ctype_t */
 
-#define PTR_ALIGN_MASK (sizeof(void*)-1)
+struct ptr_align {char ch; void* v;};
+#define PTR_ALIGN_MASK (((uintptr_t) &((struct ptr_align*) NULL)->v) - 1)
 #define FUNCTION_ALIGN_MASK (sizeof(void (*)()) - 1)
 #define DEFAULT_ALIGN_MASK 7
-#define MAX_ALIGN 16
 
 /* this needs to match the order of upvalues in luaopen_ffi
  * warning: CDATA_MT is the only upvalue copied across to the function pointer
@@ -192,9 +192,19 @@ typedef struct ctype_t {
     unsigned int has_var_arg : 1;
 } ctype_t;
 
-typedef __declspec(align(MAX_ALIGN)) union cdata_t {
-    const ctype_t type;
-} cdata_t;
+typedef union cdata_t cdata_t;
+
+#ifdef _MSC_VER
+__declspec(align(16))
+#endif
+union cdata_t {
+    const ctype_t type
+#ifdef __GNUC__
+      __attribute__ ((aligned(16)))
+#endif
+      ;
+
+};
 
 typedef void (*function_t)(void);
 

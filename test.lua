@@ -76,13 +76,5 @@ assert(c.sprintf(buf, "%g", 5.3) == 3 and ffi.string(buf) == '5.3')
 assert(c.sprintf(buf, "%d", false) == 1 and ffi.string(buf) == '0')
 assert(c.sprintf(buf, "%d%g", false, 6.7) == 4 and ffi.string(buf) == '06.7')
 
-assert(ffi.alignof('d_align') == 8)
-assert(ffi.sizeof('d_align') == 16)
-assert(ffi.offsetof('d_align', 'd') == 8)
-
-assert(ffi.alignof('d_align1') == 1)
-assert(ffi.sizeof('d_align1') == 9)
-assert(ffi.offsetof('d_align1', 'd') == 1)
-
 print('Test PASSED')
 

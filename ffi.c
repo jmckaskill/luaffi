@@ -3,109 +3,32 @@
 #include <math.h>
 #include <inttypes.h>
 
+#ifdef _WIN32
 #include <windows.h>
-#include <psapi.h>
+#else
+#include <sys/mman.h>
+#include <dlfcn.h>
+#include <unistd.h>
+#endif
 
-/* returns the value as a ctype, pushes the user value onto the stack */
-static void check_ctype(lua_State* L, int idx, ctype_t* ct)
+#ifdef _WIN32
+#define LIB_FORMAT_1 "%s.dll"
+#define AllocPage(size) VirtualAlloc(NULL, size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE)
+#define FreePage(data, size) VirtualFree(data, 0, MEM_RELEASE)
+static void EnableExecute(void* data, size_t size, int enabled)
 {
-    if (lua_isstring(L, idx)) {
-        parser_t P;
-        P.line = 1;
-        P.prev = P.next = lua_tostring(L, idx);
-        P.align_mask = DEFAULT_ALIGN_MASK;
-        parse_type(L, &P, ct);
-        parse_argument(L, &P, -1, ct, NULL);
-        lua_remove(L, -2); /* remove the user value from parse_type */
-        return;
-
-    } else if (lua_getmetatable(L, idx)) {
-        if (!lua_rawequal(L, -1, CTYPE_MT_UPVAL) && !lua_rawequal(L, -1, CDATA_MT_UPVAL)) {
-            goto err;
-        }
-
-        lua_pop(L, 1); /* pop the metatable */
-        *ct = *(ctype_t*) lua_touserdata(L, idx);
-        lua_getuservalue(L, idx);
-        return;
-
-    } else if (lua_iscfunction(L, idx)) {
-        /* cdata functions have a cdata as the first upvalue */
-        if (!lua_getupvalue(L, idx, 1) || !lua_getmetatable(L, -1) || !lua_rawequal(L, -1, CDATA_MT_UPVAL)) {
-            goto err;
-        }
-
-        lua_pop(L, 1); /* pop the metatable */
-        *ct = *(ctype_t*) lua_touserdata(L, -1);
-        lua_getuservalue(L, -1);
-        lua_remove(L, -2); /* pop the ctype */
-        return;
-    }
-
-err:
-    luaL_error(L, "expected cdata, ctype or string for arg #%d", idx);
+    DWORD oldprotect;
+    VirtualProtect(page->data, page->size, enabled ? PAGE_EXECUTE : PAGE_READWRITE, &oldprotect);
 }
-
-/* if the idx is a cdata returns the cdata_t* and pushes the user value onto
- * the stack, otherwise returns NULL and pushes nothing
- * also dereferences references */
-static void* to_cdata(lua_State* L, int idx, ctype_t* ct)
-{
-    cdata_t* cd;
-
-    if (lua_getmetatable(L, idx)) {
-        if (!lua_rawequal(L, -1, CDATA_MT_UPVAL)) {
-            lua_pop(L, 1);
-            return NULL;
-        }
-
-        lua_pop(L, 1);
-        cd = (cdata_t*) lua_touserdata(L, idx);
-        lua_getuservalue(L, idx);
-
-    } else if (lua_iscfunction(L, idx) && lua_getupvalue(L, idx, 1)) {
-        /* cdata functions have the cdata function pointer as the first upvalue */
-        if (!lua_getmetatable(L, -1)) {
-            lua_pop(L, 1);
-            return NULL;
-        } else if (!lua_rawequal(L, -1, CDATA_MT_UPVAL)) {
-            lua_pop(L, 2);
-            return NULL;
-        }
-
-        lua_pop(L, 1);
-        cd = (cdata_t*) lua_touserdata(L, -1);
-        lua_getuservalue(L, -1);
-        lua_remove(L, -2); /* remove the cdata user data */
-
-    } else {
-        return NULL;
-    }
-
-    *ct = cd->type;
-
-    if (ct->is_reference) {
-        ct->is_reference = 0;
-        return *(void**) (cd+1);
-
-    } else if (ct->pointers && !ct->is_array) {
-        return *(void**) (cd+1);
-
-    } else {
-        return cd + 1;
-    }
-}
-
-/* returns the cdata_t* and pushes the user value onto the stack
- * also dereferences references */
-static void* check_cdata(lua_State* L, int idx, ctype_t* ct)
-{
-    void* p = to_cdata(L, idx, ct);
-    if (!p) {
-        luaL_error(L, "expected cdata for arg #%d", idx);
-    }
-    return p;
-}
+#else
+#define LIB_FORMAT_1 "%s.so"
+#define LIB_FORMAT_2 "lib%s.so"
+#define LoadLibraryA(name) dlopen(name, RTLD_NOW | RTLD_GLOBAL)
+#define GetProcAddress(lib, name) dlsym(lib, name)
+#define AllocPage(size) mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0)
+#define FreePage(data, size) munmap(data, size)
+#define EnableExecute(data, size, enabled) mprotect(data, size, enabled ? PROT_READ|PROT_EXEC : PROT_READ|PROT_WRITE)
+#endif
 
 #define TO_NUMBER(TYPE, ALLOW_POINTERS)                                     \
     void* p;                                                                \
@@ -382,7 +305,7 @@ static int is_void_ptr(const ctype_t* ct)
 static int is_same_type(lua_State* L, int usr1, int usr2, const ctype_t* t1, const ctype_t* t2)
 {
     return t1->type == t2->type
-        && t1->type < UNION_TYPE || lua_rawequal(L, usr1, usr2);
+        && (t1->type < UNION_TYPE || lua_rawequal(L, usr1, usr2));
 }
 
 void* to_typed_pointer(lua_State* L, int idx, int to_usr, const ctype_t* tt)
@@ -1162,7 +1085,7 @@ static int cdata_unm(lua_State* L)
                                                                             \
     if (lt.pointers && rt.pointers) {                                       \
         if (!is_void_ptr(&lt) && !is_void_ptr(&rt) && !is_same_type(L, 3, 4, &lt, &rt)) { \
-            luaL_error(L, "trying to compare incompatible pointers");       \
+            return luaL_error(L, "trying to compare incompatible pointers");\
         }                                                                   \
         res = OP((uint64_t) left, (uint64_t) right);                        \
                                                                             \
@@ -1173,7 +1096,7 @@ static int cdata_unm(lua_State* L)
         res = OP((uint64_t) left, (uint64_t) right);                        \
                                                                             \
     } else if (rt.pointers || lt.pointers) {                                \
-        luaL_error(L, "trying to compare pointer and integer");             \
+        return luaL_error(L, "trying to compare pointer and integer");      \
                                                                             \
     } else if (IS_UNSIGNED(lt.type) && IS_UNSIGNED(rt.type)) {              \
         res = OP((uint64_t) left, (uint64_t) right);                        \
@@ -1381,11 +1304,21 @@ static int ffi_load(lua_State* L)
 
     *lib = LoadLibraryA(libname);
 
+#ifdef LIB_FORMAT_1
     if (!*lib) {
-        libname = lua_pushfstring(L, "%s.dll", libname);
+        libname = lua_pushfstring(L, LIB_FORMAT_1, lua_tostring(L, 1));
         *lib = LoadLibraryA(libname);
         lua_pop(L, 1);
     }
+#endif
+
+#ifdef LIB_FORMAT_2
+    if (!*lib) {
+        libname = lua_pushfstring(L, LIB_FORMAT_2, lua_tostring(L, 1));
+        *lib = LoadLibraryA(libname);
+        lua_pop(L, 1);
+    }
+#endif
 
     if (!*lib) {
         return luaL_error(L, "could not load library %s", lua_tostring(L, 1));
@@ -1412,18 +1345,20 @@ static int find_function(lua_State* L, int module, int name, int usr, const ctyp
     usr = lua_absindex(L, usr);
 
     for (i = 0; i < num; i++) {
-        function_t func = (function_t) GetProcAddress(libs[i], funcname);
+        if (libs[i]) {
+            function_t func = (function_t) GetProcAddress(libs[i], funcname);
 
-        if (func) {
-            push_function(jit, L, func, usr, ct);
+            if (func) {
+                push_function(jit, L, func, usr, ct);
 
-            /* cache the function in our user value for next time */
-            lua_getuservalue(L, module);
-            lua_pushvalue(L, name);
-            lua_pushvalue(L, -3);
-            lua_rawset(L, 3);
-            lua_pop(L, 1);
-            return 1;
+                /* cache the function in our user value for next time */
+                lua_getuservalue(L, module);
+                lua_pushvalue(L, name);
+                lua_pushvalue(L, -3);
+                lua_rawset(L, 3);
+                lua_pop(L, 1);
+                return 1;
+            }
         }
     }
 
@@ -1475,7 +1410,7 @@ static int jit_gc(lua_State* L)
     jit_t* jit = (jit_t*) lua_touserdata(L, 1);
     dasm_free(jit);
     for (i = 0; i < jit->pagenum; i++) {
-        VirtualFree(jit->pages[i].data, 0, MEM_RELEASE);
+        FreePage(jit->pages[i].data, jit->pages[i].size);
     }
     free(jit->globals);
     return 0;
@@ -1494,11 +1429,10 @@ void* reserve_code(jit_t* jit, size_t sz)
 
         page->size = ALIGN(sz, jit->align_page_size);
         page->off = 0;
-        page->data = (char*) VirtualAlloc(NULL, page->size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
+        page->data = (char*) AllocPage(page->size);
     } else {
-        DWORD oldprotect;
         page = &jit->pages[jit->pagenum-1];
-        VirtualProtect(page->data, page->size, PAGE_READWRITE, &oldprotect);
+        EnableExecute(page->data, page->size, 0);
     }
 
     return page->data + page->off;
@@ -1506,10 +1440,9 @@ void* reserve_code(jit_t* jit, size_t sz)
 
 void commit_code(jit_t* jit, void* p, size_t sz)
 {
-    DWORD oldprotect;
     page_t* page = &jit->pages[jit->pagenum-1];
     page->off += sz;
-    VirtualProtect(page->data, page->size, PAGE_EXECUTE, &oldprotect);
+    EnableExecute(page->data, page->size, 1);
 }
 
 static const luaL_Reg cdata_mt[] = {
@@ -1567,12 +1500,12 @@ static const luaL_Reg ffi_reg[] = {
 };
 
 /* leaves the usr table on the stack */
-static void push_builtin(lua_State* L, ctype_t* ct, const char* name, int type, int size)
+static void push_builtin(lua_State* L, ctype_t* ct, const char* name, int type, int size, int align)
 {
     memset(ct, 0, sizeof(*ct));
     ct->type = type;
     ct->size = size;
-    ct->align_mask = (size > 0) ? (size - 1) : 0;
+    ct->align_mask = align;
     ct->array_size = 1;
     ct->is_defined = 1;
 
@@ -1604,7 +1537,6 @@ static int setup_upvals(lua_State* L)
 
     /* jit setup */
     {
-        SYSTEM_INFO si;
         jit_t* jit = (jit_t*) lua_touserdata(L, JIT_UPVAL);
 
         jit->last_errno = 0;
@@ -1615,8 +1547,15 @@ static int setup_upvals(lua_State* L)
         lua_setmetatable(L, JIT_UPVAL);
 
         dasm_init(jit, 1024);
-        GetSystemInfo(&si);
-        jit->align_page_size = si.dwAllocationGranularity - 1;
+#ifdef _WIN32
+        {
+            SYSTEM_INFO si;
+            GetSystemInfo(&si);
+            jit->align_page_size = si.dwAllocationGranularity - 1;
+        }
+#else
+        jit->align_page_size = sysconf(_SC_PAGE_SIZE) - 1;
+#endif
         jit->pagenum = 0;
         jit->pages = NULL;
         jit->globals = (void**) malloc(1024 * sizeof(void*));
@@ -1628,25 +1567,33 @@ static int setup_upvals(lua_State* L)
     {
         ctype_t ct;
         /* add void type and NULL constant */
-        push_builtin(L, &ct, "void", VOID_TYPE, 0);
+        push_builtin(L, &ct, "void", VOID_TYPE, 0, 0);
 
         ct.pointers = 1;
         push_cdata(L, 0, &ct);
         lua_setfield(L, CONSTANTS_UPVAL, "NULL");
 
+#define ALIGNOF(S) ((char*) &S.v - (char*) &S - 1)
+
         /* add the rest of the builtin types */
-        push_builtin(L, &ct, "bool", BOOL_TYPE, sizeof(_Bool));
-        push_builtin(L, &ct, "uint8_t", UINT8_TYPE, 1);
-        push_builtin(L, &ct, "int8_t", INT8_TYPE, 1);
-        push_builtin(L, &ct, "uint16_t", UINT16_TYPE, 2);
-        push_builtin(L, &ct, "int16_t", INT16_TYPE, 2);
-        push_builtin(L, &ct, "uint32_t", UINT32_TYPE, 4);
-        push_builtin(L, &ct, "int32_t", INT32_TYPE, 4);
-        push_builtin(L, &ct, "uint64_t", UINT64_TYPE, 8);
-        push_builtin(L, &ct, "int64_t", INT64_TYPE, 8);
-        push_builtin(L, &ct, "float", FLOAT_TYPE, 4);
-        push_builtin(L, &ct, "double", DOUBLE_TYPE, 8);
-        push_builtin(L, &ct, "uintptr_t", UINTPTR_TYPE, sizeof(uintptr_t));
+        push_builtin(L, &ct, "bool", BOOL_TYPE, sizeof(_Bool), sizeof(_Bool) -1);
+        push_builtin(L, &ct, "uint8_t", UINT8_TYPE, 1, 0);
+        push_builtin(L, &ct, "int8_t", INT8_TYPE, 1, 0);
+        struct {char ch; uint16_t v;} a16;
+        push_builtin(L, &ct, "uint16_t", UINT16_TYPE, 2, ALIGNOF(a16));
+        push_builtin(L, &ct, "int16_t", INT16_TYPE, 2, ALIGNOF(a16));
+        struct {char ch; uint32_t v;} a32;
+        push_builtin(L, &ct, "uint32_t", UINT32_TYPE, 4, ALIGNOF(a32));
+        push_builtin(L, &ct, "int32_t", INT32_TYPE, 4, ALIGNOF(a32));
+        struct {char ch; uint64_t v;} a64;
+        push_builtin(L, &ct, "uint64_t", UINT64_TYPE, 8, ALIGNOF(a64));
+        push_builtin(L, &ct, "int64_t", INT64_TYPE, 8, ALIGNOF(a64));
+        struct {char ch; float v;} af;
+        push_builtin(L, &ct, "float", FLOAT_TYPE, 4, ALIGNOF(af));
+        struct {char ch; double v;} ad;
+        push_builtin(L, &ct, "double", DOUBLE_TYPE, 8, ALIGNOF(ad));
+        struct {char ch; uintptr_t v;} aptr;
+        push_builtin(L, &ct, "uintptr_t", UINTPTR_TYPE, sizeof(uintptr_t), ALIGNOF(aptr));
     }
 
     /* setup builtin typedefs */
@@ -1748,7 +1695,10 @@ static int setup_upvals(lua_State* L)
 
     /* ffi.C */
     {
-        HMODULE* libs = lua_newuserdata(L, sizeof(HMODULE) * 6);
+#ifdef _WIN32
+        size_t sz = sizeof(HMODULE) * 6;
+        HMODULE* libs = lua_newuserdata(L, sz);
+        memset(libs, 0, sz);
 
         /* exe */
         GetModuleHandleExA(0, NULL, &libs[0]);
@@ -1760,6 +1710,20 @@ static int setup_upvals(lua_State* L)
         libs[3] = LoadLibraryA("kernel32.dll");
         libs[4] = LoadLibraryA("user32.dll");
         libs[5] = LoadLibraryA("gdi32.dll");
+
+#else
+        size_t sz = sizeof(void*) * 5;
+        void** libs = lua_newuserdata(L, sz);
+        memset(libs, 0, sz);
+
+        libs[0] = LoadLibraryA(NULL); /* exe */
+        libs[1] = LoadLibraryA("libc.so");
+#ifdef __GNUC__
+        libs[2] = LoadLibraryA("libgcc.so");
+#endif
+        libs[3] = LoadLibraryA("libm.so");
+        libs[4] = LoadLibraryA("libdl.so");
+#endif
 
         lua_pushvalue(L, CONSTANTS_UPVAL);
         lua_setuservalue(L, -2);
