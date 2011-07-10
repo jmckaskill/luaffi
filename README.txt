@@ -12,8 +12,7 @@ MIT same as Lua 5.1
 
 Platforms
 ---------
-Currently only windows x86 dll with vc. Adding posix x86 is trivial, other
-architectures is more work.
+Currently only windows x86 and linux x86 are supported.
 
 Runs with both Lua 5.1 and Lua 5.2 beta.
 
