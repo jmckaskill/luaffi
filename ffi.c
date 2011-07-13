@@ -18,7 +18,7 @@
 static void EnableExecute(void* data, size_t size, int enabled)
 {
     DWORD oldprotect;
-    VirtualProtect(page->data, page->size, enabled ? PAGE_EXECUTE : PAGE_READWRITE, &oldprotect);
+    VirtualProtect(data, size, enabled ? PAGE_EXECUTE : PAGE_READWRITE, &oldprotect);
 }
 #else
 #define LIB_FORMAT_1 "%s.so"
@@ -29,6 +29,41 @@ static void EnableExecute(void* data, size_t size, int enabled)
 #define FreePage(data, size) munmap(data, size)
 #define EnableExecute(data, size, enabled) mprotect(data, size, enabled ? PROT_READ|PROT_EXEC : PROT_READ|PROT_WRITE)
 #endif
+
+static int type_error(lua_State* L, int idx, const char* to_type, int to_usr, const ctype_t* to_ct)
+{
+    luaL_Buffer B;
+    ctype_t ft;
+
+    assert(to_type || (to_usr && to_ct));
+    if (to_usr) {
+        to_usr = lua_absindex(L, to_usr);
+    }
+
+    idx = lua_absindex(L, idx);
+
+    luaL_buffinit(L, &B);
+
+    if (to_cdata(L, idx, &ft)) {
+        push_type_name(L, -1, &ft);
+        lua_pushfstring(L, "unable to convert argument %d from ctype %s to ctype ", idx, lua_tostring(L, -1));
+        lua_remove(L, -2);
+        luaL_addvalue(&B);
+    } else {
+        lua_pushfstring(L, "unable to convert argument %d from lua type %s to ctype ", idx, luaL_typename(L, idx));
+        luaL_addvalue(&B);
+    }
+
+    if (to_ct) {
+        push_type_name(L, to_usr, to_ct);
+        luaL_addvalue(&B);
+    } else {
+        luaL_addstring(&B, to_type);
+    }
+
+    luaL_pushresult(&B);
+    return lua_error(L);
+}
 
 #define TO_NUMBER(TYPE, ALLOW_POINTERS)                                     \
     void* p;                                                                \
@@ -92,7 +127,7 @@ static void EnableExecute(void* data, size_t size, int enabled)
     }                                                                       \
                                                                             \
 err:                                                                        \
-    luaL_error(L, "unable to convert value to a cdata");                    \
+    type_error(L, idx, #TYPE, 0, NULL);                                     \
     return 0
 
 int32_t to_int32(lua_State* L, int idx)
@@ -182,10 +217,10 @@ void unpack_varargs(lua_State* L, int first, int last, char* to)
     return;
 
 err:
-    luaL_error(L, "unable to convert arg %d for vararg function", i);
+    type_error(L, i, "vararg", 0, NULL);
 }
 
-int32_t to_enum(lua_State* L, int idx, int to_usr)
+int32_t to_enum(lua_State* L, int idx, int to_usr, const ctype_t* to_ct)
 {
     int32_t ret;
 
@@ -215,7 +250,7 @@ int32_t to_enum(lua_State* L, int idx, int to_usr)
     }
 
 err:
-    return luaL_error(L, "unable to convert to enum");
+    return type_error(L, idx, NULL, to_usr, to_ct);
 }
 
 static void* to_pointer(lua_State* L, int idx, ctype_t* ct)
@@ -223,6 +258,7 @@ static void* to_pointer(lua_State* L, int idx, ctype_t* ct)
     void* p;
     memset(ct, 0, sizeof(*ct));
     ct->pointers = 1;
+    idx = lua_absindex(L, idx);
 
     switch (lua_type(L, idx)) {
     case LUA_TNIL:
@@ -258,7 +294,7 @@ static void* to_pointer(lua_State* L, int idx, ctype_t* ct)
         break;
     }
 
-    luaL_error(L, "unable to convert value to a cdata");
+    type_error(L, idx, "pointer", 0, NULL);
     return NULL;
 }
 
@@ -292,7 +328,7 @@ static function_t to_function(lua_State* L, int idx, ctype_t* ct)
     }
 
 err:
-    luaL_error(L, "unable to convert value to a cdata");
+    type_error(L, idx, "function", 0, NULL);
     return NULL;
 }
 
@@ -338,7 +374,7 @@ suc:
     return p;
 
 err:
-    luaL_error(L, "invalid conversion");
+    type_error(L, idx, NULL, to_usr, tt);
     return NULL;
 }
 
@@ -357,7 +393,7 @@ function_t to_typed_function(lua_State* L, int idx, int to_usr, const ctype_t* t
     return f;
 
 err:
-    luaL_error(L, "invalid conversion");
+    type_error(L, idx, NULL, to_usr, tt);
     return NULL;
 }
 
@@ -367,6 +403,9 @@ static void set_array(lua_State* L, int idx, void* to, int to_usr, const ctype_t
 {
     size_t i, sz, esz;
     ctype_t et;
+
+    idx = lua_absindex(L, idx);
+    to_usr = lua_absindex(L, to_usr);
 
     switch (lua_type(L, idx)) {
     case LUA_TSTRING:
@@ -389,7 +428,6 @@ static void set_array(lua_State* L, int idx, void* to, int to_usr, const ctype_t
         et.pointers--;
         et.is_array = 0;
         et.array_size = 1;
-        to_usr = lua_absindex(L, to_usr);
         esz = et.pointers ? sizeof(void*) : et.size;
 
         lua_rawgeti(L, idx, 2);
@@ -437,7 +475,7 @@ static void set_array(lua_State* L, int idx, void* to, int to_usr, const ctype_t
     return;
 
 err:
-    luaL_error(L, "unable to convert to array");
+    type_error(L, idx, NULL, to_usr, tt);
 }
 
 static void set_struct(lua_State* L, int idx, void* to, int to_usr, const ctype_t* tt, int check_pointers)
@@ -447,6 +485,9 @@ static void set_struct(lua_State* L, int idx, void* to, int to_usr, const ctype_
     const ctype_t* mt;
     void* p;
 
+    to_usr = lua_absindex(L, to_usr);
+    idx = lua_absindex(L, idx);
+
     switch (lua_type(L, idx)) {
     case LUA_TTABLE:
         /* match up to the members based off the table initializers key - this
@@ -455,8 +496,6 @@ static void set_struct(lua_State* L, int idx, void* to, int to_usr, const ctype_
          * zero initialize the c struct, and only one entry in the initializer
          * - set all members to this value */
         memset(to, 0, tt->size);
-        to_usr = lua_absindex(L, to_usr);
-        idx = lua_absindex(L, idx);
         lua_pushnil(L);
         while (lua_next(L, idx)) {
 
@@ -518,7 +557,7 @@ static void set_struct(lua_State* L, int idx, void* to, int to_usr, const ctype_
     return;
 
 err:
-    luaL_error(L, "unable to convert to struct");
+    type_error(L, idx, NULL, to_usr, tt);
 }
 
 static void set_value(lua_State* L, int idx, void* to, int to_usr, const ctype_t* tt, int check_pointers)
@@ -576,7 +615,7 @@ static void set_value(lua_State* L, int idx, void* to, int to_usr, const ctype_t
             *(uintptr_t*) to = to_uintptr(L, idx);
             break;
         case ENUM_TYPE:
-            *(int32_t*) to = to_enum(L, idx, to_usr);
+            *(int32_t*) to = to_enum(L, idx, to_usr, tt);
             break;
         case STRUCT_TYPE:
         case UNION_TYPE:
@@ -589,7 +628,7 @@ static void set_value(lua_State* L, int idx, void* to, int to_usr, const ctype_t
 
     return;
 err:
-    luaL_error(L, "can't convert");
+    type_error(L, idx, NULL, to_usr, tt);
 }
 
 static int ffi_typeof(lua_State* L)
@@ -668,7 +707,8 @@ static int ffi_offsetof(lua_State* L)
     check_ctype(L, 1, &ct);
 
     if (ct.type != STRUCT_TYPE) {
-        return luaL_error(L, "type is not a struct");
+        push_type_name(L, -1, &ct);
+        return luaL_error(L, "argument 1 has type %s and is not a struct");
     }
 
     /* get the member ctype */
@@ -680,7 +720,8 @@ static int ffi_offsetof(lua_State* L)
         lua_pushnumber(L, mbr->offset);
         return 1;
     } else {
-        return luaL_error(L, "member not found in struct");
+        push_type_name(L, -2, &ct);
+        return luaL_error(L, "member %s not found in %s", lua_tostring(L, 2), lua_tostring(L, -1));
     }
 }
 
@@ -776,7 +817,8 @@ static void* find_member(lua_State* L, ctype_t* type)
         lua_rawget(L, -2);
 
         if (lua_isnil(L, -1)) {
-            luaL_error(L, "invalid member name");
+            push_type_name(L, -2, type);
+            luaL_error(L, "type %s does not have member %s", lua_tostring(L, -1), lua_tostring(L, 2));
         }
 
         /* get member type */
@@ -788,7 +830,7 @@ static void* find_member(lua_State* L, ctype_t* type)
         return data;
 
     default:
-        luaL_error(L, "invalid key type");
+        luaL_error(L, "invalid key type %s", luaL_typename(L, 2));
         return NULL;
     }
 }
@@ -909,6 +951,7 @@ static int64_t to_intptr(lua_State* L, int idx, ctype_t* ct)
         } else if (ct->type == UINT64_TYPE) {
             return *(int64_t*) p;
         } else {
+            lua_pop(L, 1);
             goto err;
         }
 
@@ -917,7 +960,7 @@ static int64_t to_intptr(lua_State* L, int idx, ctype_t* ct)
     }
 
 err:
-    luaL_error(L, "unable to convert value to a cdata");
+    type_error(L, idx, "intptr_t", 0, NULL);
     return 0;
 }
 
@@ -1085,7 +1128,11 @@ static int cdata_unm(lua_State* L)
                                                                             \
     if (lt.pointers && rt.pointers) {                                       \
         if (!is_void_ptr(&lt) && !is_void_ptr(&rt) && !is_same_type(L, 3, 4, &lt, &rt)) { \
-            return luaL_error(L, "trying to compare incompatible pointers");\
+            lua_getuservalue(L, 1);                                         \
+            lua_getuservalue(L, 2);                                         \
+            push_type_name(L, -2, &lt);                                     \
+            push_type_name(L, -2, &lt);                                     \
+            return luaL_error(L, "trying to compare incompatible pointers of types %s and %s", lua_tostring(L, -2), lua_tostring(L, -1));\
         }                                                                   \
         res = OP((uint64_t) left, (uint64_t) right);                        \
                                                                             \
@@ -1129,16 +1176,11 @@ static int cdata_le(lua_State* L)
 
 static int ctype_tostring(lua_State* L)
 {
-    luaL_Buffer B;
     const ctype_t* ct = (const ctype_t*) lua_touserdata(L, 1);
-    lua_settop(L, 1);
-    lua_getuservalue(L, 1);
 
-    luaL_buffinit(L, &B);
-    luaL_addstring(&B, "ctype<");
-    append_type_string(&B, 2, ct);
-    luaL_addchar(&B, '>');
-    luaL_pushresult(&B);
+    lua_getuservalue(L, 1);
+    push_type_name(L, -1, ct);
+    lua_pushfstring(L, "ctype<%s>", lua_tostring(L, -1));
 
     return 1;
 }
@@ -1148,7 +1190,6 @@ static int cdata_tostring(lua_State* L)
     ctype_t ct;
     void* p;
     char buf[64];
-    lua_settop(L, 1);
     p = to_cdata(L, 1, &ct);
 
     if (ct.pointers == 0 && ct.type == UINT64_TYPE) {
@@ -1163,13 +1204,8 @@ static int cdata_tostring(lua_State* L)
         lua_pushfstring(L, "%p", *(int64_t*) p);
 
     } else {
-        luaL_Buffer B;
-        luaL_buffinit(L, &B);
-        luaL_addstring(&B, "cdata<");
-        append_type_string(&B, 2, &ct);
-        lua_pushfstring(L, ">: %p", p);
-        luaL_addvalue(&B);
-        luaL_pushresult(&B);
+        push_type_name(L, -1, &ct);
+        lua_pushfstring(L, "cdata<%s>: %p", lua_tostring(L, -1), p);
     }
 
     return 1;
@@ -1565,6 +1601,12 @@ static int setup_upvals(lua_State* L)
 
     /* setup builtin types */
     {
+        struct {char ch; uint16_t v;} a16;
+        struct {char ch; uint32_t v;} a32;
+        struct {char ch; uint64_t v;} a64;
+        struct {char ch; float v;} af;
+        struct {char ch; double v;} ad;
+        struct {char ch; uintptr_t v;} aptr;
         ctype_t ct;
         /* add void type and NULL constant */
         push_builtin(L, &ct, "void", VOID_TYPE, 0, 0);
@@ -1579,20 +1621,14 @@ static int setup_upvals(lua_State* L)
         push_builtin(L, &ct, "bool", BOOL_TYPE, sizeof(_Bool), sizeof(_Bool) -1);
         push_builtin(L, &ct, "uint8_t", UINT8_TYPE, 1, 0);
         push_builtin(L, &ct, "int8_t", INT8_TYPE, 1, 0);
-        struct {char ch; uint16_t v;} a16;
         push_builtin(L, &ct, "uint16_t", UINT16_TYPE, 2, ALIGNOF(a16));
         push_builtin(L, &ct, "int16_t", INT16_TYPE, 2, ALIGNOF(a16));
-        struct {char ch; uint32_t v;} a32;
         push_builtin(L, &ct, "uint32_t", UINT32_TYPE, 4, ALIGNOF(a32));
         push_builtin(L, &ct, "int32_t", INT32_TYPE, 4, ALIGNOF(a32));
-        struct {char ch; uint64_t v;} a64;
         push_builtin(L, &ct, "uint64_t", UINT64_TYPE, 8, ALIGNOF(a64));
         push_builtin(L, &ct, "int64_t", INT64_TYPE, 8, ALIGNOF(a64));
-        struct {char ch; float v;} af;
         push_builtin(L, &ct, "float", FLOAT_TYPE, 4, ALIGNOF(af));
-        struct {char ch; double v;} ad;
         push_builtin(L, &ct, "double", DOUBLE_TYPE, 8, ALIGNOF(ad));
-        struct {char ch; uintptr_t v;} aptr;
         push_builtin(L, &ct, "uintptr_t", UINTPTR_TYPE, sizeof(uintptr_t), ALIGNOF(aptr));
     }
 

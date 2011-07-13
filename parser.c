@@ -717,11 +717,10 @@ void parse_type(lua_State* L, parser_t* P, ctype_t* type)
     assert(lua_gettop(L) == top + 1 && lua_istable(L, -1));
 }
 
-void append_type_string(luaL_Buffer* B, int usr, const ctype_t* ct)
+static void append_type_name(luaL_Buffer* B, int usr, const ctype_t* ct)
 {
     size_t i;
     lua_State* L = B->L;
-    usr = lua_absindex(L, usr);
 
     switch (ct->type) {
     case ENUM_TYPE:
@@ -801,6 +800,15 @@ void append_type_string(luaL_Buffer* B, int usr, const ctype_t* ct)
     }
 }
 
+void push_type_name(lua_State* L, int usr, const ctype_t* ct)
+{
+    luaL_Buffer B;
+    usr = lua_absindex(L, usr);
+    luaL_buffinit(L, &B);
+    append_type_name(&B, usr, ct);
+    luaL_pushresult(&B);
+}
+
 static void push_function_type_string(lua_State* L, int usr, const ctype_t* ct)
 {
     size_t i, args;
@@ -816,7 +824,7 @@ static void push_function_type_string(lua_State* L, int usr, const ctype_t* ct)
      * and use indexes relative to top to avoid problems due to the buffer
      * system pushing a variable number of arguments onto the stack */
     luaL_buffinit(L, &B);
-    append_type_string(&B, top+2, (const ctype_t*) lua_touserdata(L, top+1));
+    append_type_name(&B, top+2, (const ctype_t*) lua_touserdata(L, top+1));
 
     switch (ct->calling_convention) {
     case STD_CALL:
@@ -843,7 +851,7 @@ static void push_function_type_string(lua_State* L, int usr, const ctype_t* ct)
         lua_replace(L, top+1);
         lua_getuservalue(L, top+1);
         lua_replace(L, top+2);
-        append_type_string(&B, top+2, (const ctype_t*) lua_touserdata(L, top+1));
+        append_type_name(&B, top+2, (const ctype_t*) lua_touserdata(L, top+1));
     }
 
     luaL_addstring(&B, ")");

@@ -31,28 +31,43 @@ int print_s(char* buf, const char* val);
 int print_d(char* buf, double val);
 int print_f(char* buf, float val);
 int print_p(char* buf, void* val);
-
-struct d_align {
-    char a;
-    double d;
-};
-#pragma pack(push)
-#pragma pack(1)
-struct d_align1 {
-    char a;
-    double d;
-};
-#pragma pack(pop)
-
-int print_d_align(char* buf, d_align* p);
-int print_d_align1(char* buf, d_align1* p);
-
 int sprintf(char* buf, const char* format, ...);
 ]]
 
+local align = [[
+struct align_ALIGN_SUFFIX {
+    char pad;
+    TYPE v;
+};
+
+int print_align_ALIGN_SUFFIX(char* buf, struct align_ALIGN_SUFFIX* p);
+]]
+
+local palign = [[
+#pragma pack(push)
+#pragma pack(ALIGN)
+]] .. align .. [[
+#pragma pack(pop)
+]]
+
+local test_values = {
+    ['void*'] = ffi.new('char[3]'),
+    ['const char*'] = 'foo',
+    float = 3.4,
+    double = 5.6,
+    uint16_t = 65000,
+    uint32_t = 700000056,
+    uint64_t = 12345678901234,
+}
+
 local buf = ffi.new('char[256]')
 
-for _,c in ipairs(dlls) do
+local function checkbuf(type, ret)
+    local str = tostring(test_values[type]):gsub('^cdata%b<>: ', '')
+    assert(ffi.string(buf) == str and ret == #str)
+end
+
+for i,c in ipairs(dlls) do
     assert(c.add_i8(1,1) == 2)
     assert(c.add_i8(256,1) == 1)
     assert(c.add_i8(127,1) == -128)
@@ -62,12 +77,26 @@ for _,c in ipairs(dlls) do
     assert(c.add_u8(-1,0) == 255)
     assert(c.add_i16(2000,4000) == 6000)
 
-    assert(c.print_s(buf, "foo") == 3 and ffi.string(buf) == 'foo')
-    assert(c.print_i8(buf, 3) == 1 and ffi.string(buf) == '3')
-    assert(c.print_u8(buf, 200) == 3 and ffi.string(buf) == '200')
-    assert(c.print_d(buf, 3.4) == 3 and ffi.string(buf) == '3.4')
-    assert(c.print_d_align(buf, ffi.new('d_align', {1, 3.2})) == 3 and ffi.string(buf) == '3.2')
-    assert(c.print_d_align1(buf, ffi.new('d_align1', {1, 3.6})) == 3 and ffi.string(buf) == '3.6')
+    for suffix, type in pairs{d = 'double', f = 'float', u64 = 'uint64_t', u32 = 'uint32_t', u16 = 'uint16_t', s = 'const char*', p = 'void*'} do
+        local test = test_values[type]
+        checkbuf(type, c['print_' .. suffix](buf, test))
+
+        if i == 1 then
+            ffi.cdef(align:gsub('SUFFIX', suffix):gsub('TYPE', type):gsub('ALIGN', 0))
+        end
+
+        local v = ffi.new('struct align_0_' .. suffix, {0, test})
+        checkbuf(type, c['print_align_0_' .. suffix](buf, v))
+
+        for _,align in ipairs{1,2,4,8,16} do
+            if i == 1 then
+                ffi.cdef(palign:gsub('SUFFIX', suffix):gsub('TYPE', type):gsub('ALIGN', align))
+            end
+
+            local v = ffi.new('struct align_' .. align .. '_' .. suffix, {0, test})
+            checkbuf(type, c['print_align_' .. align .. '_' .. suffix](buf, v))
+        end
+    end
 end
 
 local c = ffi.C

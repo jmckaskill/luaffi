@@ -217,27 +217,28 @@ void* check_cdata(lua_State* L, int idx, ctype_t* ct);
 
 void parse_type(lua_State* L, parser_t* P, ctype_t* type);
 const char* parse_argument(lua_State* L, parser_t* P, int ct_usr, ctype_t* type, size_t* namesz);
-void append_type_string(luaL_Buffer* B, int usr, const ctype_t* ct);
+void push_type_name(lua_State* L, int usr, const ctype_t* ct);
 
 int ffi_cdef(lua_State* L);
 
 void* reserve_code(jit_t* jit, size_t sz);
 void commit_code(jit_t* jit, void* p, size_t sz);
 
+int x86_stack_required(lua_State* L, int usr);
+void push_function(jit_t* jit, lua_State* L, function_t f, int ct_usr, const ctype_t* ct);
+void compile_globals(jit_t* jit, lua_State* L);
+
+/* WARNING: assembly needs to be updated for prototype changes of these functions */
 double to_double(lua_State* L, int idx);
 uint64_t to_uint64(lua_State* L, int idx);
 int64_t to_int64(lua_State* L, int idx);
 int32_t to_int32(lua_State* L, int idx);
 uint32_t to_uint32(lua_State* L, int idx);
 uintptr_t to_uintptr(lua_State* L, int idx);
-int32_t to_enum(lua_State* L, int idx, int to_usr);
+int32_t to_enum(lua_State* L, int idx, int to_usr, const ctype_t* tt);
 void* to_typed_pointer(lua_State* L, int idx, int to_usr, const ctype_t* tt);
 function_t to_typed_function(lua_State* L, int idx, int to_usr, const ctype_t* tt);
 void unpack_varargs(lua_State* L, int first, int last, char* to);
-
-int x86_stack_required(lua_State* L, int usr);
-void push_function(jit_t* jit, lua_State* L, function_t f, int ct_usr, const ctype_t* ct);
-void compile_globals(jit_t* jit, lua_State* L);
 
 
 

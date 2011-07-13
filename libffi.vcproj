@@ -72,50 +72,22 @@
 			<File
 				RelativePath=".\call.c"
 				>
-				<FileConfiguration
-					Name="Debug|Win32"
-					>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="Release|Win32"
-					>
-				</FileConfiguration>
 			</File>
 			<File
 				RelativePath=".\ctype.c"
 				>
-				<FileConfiguration
-					Name="Debug|Win32"
-					>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="Release|Win32"
-					>
-				</FileConfiguration>
 			</File>
 			<File
 				RelativePath=".\ffi.c"
 				>
-				<FileConfiguration
-					Name="Debug|Win32"
-					>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="Release|Win32"
-					>
-				</FileConfiguration>
 			</File>
 			<File
 				RelativePath=".\parser.c"
 				>
-				<FileConfiguration
-					Name="Debug|Win32"
-					>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="Release|Win32"
-					>
-				</FileConfiguration>
+			</File>
+			<File
+				RelativePath=".\test.c"
+				>
 			</File>
 		</Filter>
 		<Filter
@@ -126,38 +98,14 @@
 			<File
 				RelativePath=".\ffi.h"
 				>
-				<FileConfiguration
-					Name="Debug|Win32"
-					>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="Release|Win32"
-					>
-				</FileConfiguration>
 			</File>
 			<File
 				RelativePath=".\stdbool.h"
 				>
-				<FileConfiguration
-					Name="Debug|Win32"
-					>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="Release|Win32"
-					>
-				</FileConfiguration>
 			</File>
 			<File
 				RelativePath=".\stdint.h"
 				>
-				<FileConfiguration
-					Name="Debug|Win32"
-					>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="Release|Win32"
-					>
-				</FileConfiguration>
 			</File>
 		</Filter>
 		<Filter

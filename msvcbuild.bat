@@ -5,21 +5,18 @@
 @set LUA_LIB=C:\Lua5.1\lib\lua5.1.lib
 @set LUA_EXE=C:\Lua5.1\lua.exe
 
-@if "%1"=="debug" goto :DEBUG
+@set DO_CL=cl /nologo /c /MDd /FC /Zi /Od /W3 /WX /D_CRT_SECURE_NO_DEPRECATE /I"msvc"
+@set DO_LINK=link /nologo /debug
+@set DO_MT=mt /nologo
+
+@if "%1"=="debug" goto :COMPILE
 @if "%1"=="clean" goto :CLEAN
-goto :RELEASE
+@if "%1"=="test" goto :COMPILE
 
 :RELEASE
 @set DO_CL=cl.exe /nologo /c /MD /Ox /W3 /WX /D_CRT_SECURE_NO_DEPRECATE /I"msvc"
 @set DO_LINK=link.exe /nologo
 @set DO_MT=mt.exe /nologo
-@goto :COMPILE
-
-:DEBUG
-@set DO_CL=cl /nologo /c /MDd /FC /Zi /Od /W3 /WX /D_CRT_SECURE_NO_DEPRECATE /I"msvc"
-@set DO_LINK=link /nologo /debug
-@set DO_MT=mt /nologo
-@goto :COMPILE
 
 :COMPILE
 %LUA_EXE% dynasm\dynasm.lua -LN -o call_x86.h call_x86.dasc
@@ -27,6 +24,8 @@ goto :RELEASE
 %DO_LINK% /DLL /OUT:ffi.dll "%LUA_LIB%" *.obj
 if exist ffi.dll.manifest^
     %DO_MT% -manifest ffi.dll.manifest -outputresource:"ffi.dll;2"
+@if "%1"=="test" goto :TEST
+@goto :CLEAN_OBJ
 
 :TEST
 %DO_CL% /Gd test.c /Fo"test_cdecl.obj"
@@ -39,11 +38,15 @@ if exist test_stdcall.dll.manifest^
     %DO_MT% -manifest test_stdcall.dll.manifest -outputresource:"test_stdcall.dll;2"
 
 %LUA_EXE% test.lua
+@goto :CLEAN_OBJ
 
 :CLEAN
+del *.exe
+:CLEAN_OBJ
 del *.obj *.manifest test_*.dll
-
 @goto :END
+
 :FAIL
 @echo You must open a "Visual Studio .NET Command Prompt" to run this script
 :END
+

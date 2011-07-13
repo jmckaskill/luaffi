@@ -48,26 +48,40 @@ PRINT(float, print_f, "g")
 PRINT(const char*, print_s, "s")
 PRINT(void*, print_p, "p")
 
-struct d_align {
-    char a;
-    double d;
-};
+#define ALIGN(TYPE, SUFFIX, FORMAT) \
+    struct align_##SUFFIX {         \
+        char pad;                   \
+        TYPE v;                     \
+    };                              \
+    EXPORT int print_align_##SUFFIX(char* buf, struct align_##SUFFIX* p);   \
+    EXPORT int print_align_##SUFFIX(char* buf, struct align_##SUFFIX* p) {  \
+        return sprintf(buf, "%" FORMAT, p->v);                              \
+    }
+
+#define ALIGN2(A)                       \
+    ALIGN(uint16_t, A##_u16, PRIu16)    \
+    ALIGN(uint32_t, A##_u32, PRIu32)    \
+    ALIGN(uint64_t, A##_u64, PRIu64)    \
+    ALIGN(float, A##_f, "g")            \
+    ALIGN(double, A##_d, "g")           \
+    ALIGN(const char*, A##_s, "s")      \
+    ALIGN(void*, A##_p, "p")
+
+ALIGN2(0)
+
 #pragma pack(push)
 #pragma pack(1)
-struct d_align1 {
-    char a;
-    double d;
-};
+ALIGN2(1)
+#pragma pack(2)
+ALIGN2(2)
+#pragma pack(4)
+ALIGN2(4)
+#pragma pack(8)
+ALIGN2(8)
+#pragma pack(16)
+ALIGN2(16)
 #pragma pack(pop)
 
-EXPORT int print_d_align(char* buf, struct d_align* p);
-EXPORT int print_d_align1(char* buf, struct d_align1* p);
-
-int print_d_align(char* buf, struct d_align* p)
-{return sprintf(buf, "%g", p->d);}
-
-int print_d_align1(char* buf, struct d_align1* p)
-{return sprintf(buf, "%g", p->d);}
 
 
 
