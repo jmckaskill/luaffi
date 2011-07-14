@@ -238,7 +238,7 @@ uintptr_t to_uintptr(lua_State* L, int idx);
 int32_t to_enum(lua_State* L, int idx, int to_usr, const ctype_t* tt);
 void* to_typed_pointer(lua_State* L, int idx, int to_usr, const ctype_t* tt);
 function_t to_typed_function(lua_State* L, int idx, int to_usr, const ctype_t* tt);
-void unpack_varargs(lua_State* L, int first, int last, char* to);
+void unpack_varargs(lua_State* L, int first, char* to);
 
 
 

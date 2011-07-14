@@ -148,11 +148,12 @@ double to_double(lua_State* L, int idx)
 uintptr_t to_uintptr(lua_State* L, int idx)
 { TO_NUMBER(uintptr_t, 1); }
 
-void unpack_varargs(lua_State* L, int first, int last, char* to)
+void unpack_varargs(lua_State* L, int first, char* to)
 {
     void* p;
     ctype_t ct;
     int i;
+    int last = lua_gettop(L);
 
     for (i = first; i <= last; i++) {
         switch (lua_type(L, i)) {
@@ -1739,7 +1740,7 @@ static int setup_upvals(lua_State* L)
         /* exe */
         GetModuleHandleExA(0, NULL, &libs[0]);
         /* lua dll */
-        GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (char*) &lua_tonumber, &libs[1]);
+        GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (char*) &lua_toboolean, &libs[1]);
         /* crt */
         GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (char*) &_fmode, &libs[2]);
 

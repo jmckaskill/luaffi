@@ -714,7 +714,7 @@ void parse_type(lua_State* L, parser_t* P, ctype_t* type)
         }
     }
 
-    assert(lua_gettop(L) == top + 1 && lua_istable(L, -1));
+    assert(lua_gettop(L) == top + 1 && (lua_istable(L, -1) || lua_isnil(L, -1)));
 }
 
 static void append_type_name(luaL_Buffer* B, int usr, const ctype_t* ct)
@@ -1137,7 +1137,7 @@ const char* parse_argument(lua_State* L, parser_t* P, int ct_usr, ctype_t* type,
 
     type->calling_convention = C_CALL;
     lua_pushvalue(L, ct_usr);
-    assert(lua_gettop(L) == top + 1 && lua_istable(L, -1));
+    assert(lua_gettop(L) == top + 1 && (lua_istable(L, -1) || lua_isnil(L, -1)));
     return name;
 }
 
