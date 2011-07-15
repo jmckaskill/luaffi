@@ -8,6 +8,7 @@ all: ffi.so
 
 clean: 
 	rm -f *.o *.so call_*.h
+	dos2unix *.h *.c *.dasc *.txt *.vcproj
 
 call_x86.h: call_x86.dasc
 	$(LUA) dynasm/dynasm.lua -LN -o $@ $<
