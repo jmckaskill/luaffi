@@ -118,6 +118,9 @@ struct jit_t {
     size_t align_page_size;
     void** globals;
     int function_extern;
+    int errno_extern;
+    void* lua_dll;
+    void* kernel32_dll;
 };
 
 #define ALIGN(PTR, MASK) \

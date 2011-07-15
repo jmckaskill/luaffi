@@ -48,8 +48,8 @@
 			>
 			<Tool
 				Name="VCNMakeTool"
-				BuildCommandLine="msvcbuild.bat"
-				ReBuildCommandLine="msvcbuild.bat"
+				BuildCommandLine="msvcbuild.bat test-release"
+				ReBuildCommandLine="msvcbuild.bat test-release"
 				CleanCommandLine="msvcbuild.bat clean"
 				Output=""
 				PreprocessorDefinitions=""

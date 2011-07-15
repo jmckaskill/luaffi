@@ -123,45 +123,69 @@
 #define JUMP_SIZE (8)
 #endif
 
+#ifdef NDEBUG
+#define shred(a,b,c)
+#else
+#define shred(p,s,e) memset((p)+(s),0xCC,(e)-(s))
+#endif
+
 static void compile_errno_load(jit_t* jit, lua_State* L, uint8_t* code)
 {
+    /* create a stub which returns the value of &jit->last_errno in rcx
+     *
+     * manually setup the commands so a) we can use rip relative displacement
+     * and (dynasm doesn't support this) b) the jit state already has commands
+     * buffered up
+     */
 #if defined _WIN64 || defined __amd64__
-    /* lea rcx, [rip+1] */
+    /* lea rcx, [rip+1]
+     * ret
+     * &jit->last_errno
+     */
     code[0] = 0x48; /* REX.W */
     code[1] = 0x8B; /* mov */
     code[2] = 0x0D; /* disp32 to rcx */
     *(int32_t*) &code[3] = 1;
     code[7] = 0xC3; /* ret */
     *(void**) &code[8] = &jit->last_errno;
+    shred(code, 16, JUMP_SIZE);
 #else
-    /* lea rcx, &jit->last_errno */
-    code[0] = 0x8B; /* lea */
+    /* lea rcx, &jit->last_errno
+     * ret
+     */
+    code[0] = 0x8D; /* lea */
     code[1] = 0x0D; /* disp32 to ecx */
     *(void**) &code[2] = &jit->last_errno;
     code[6] = 0xC3; /* ret */
+    shred(code, 7, JUMP_SIZE);
 #endif
 }
 
 static void compile_extern_jump(jit_t* jit, lua_State* L, function_t func, uint8_t* code)
 {
-#if defined _WIN64 || defined __amd64__
-    /* We can't use call &func, because the function offset may be larger than
-     * 2 GB so instead we use rip relative addressing to jump to the pointer
-     * stored right after the jmp instruction, but dynasm doesn't support rip
-     * relative so we have to do this manually
+    /* The jump code is the function pointer followed by a stub to call the
+     * function pointer. The stub exists in 64 bit so we can jump to functions
+     * with an offset greater than 2 GB.
+     *
+     * Note we have to manually set this up since there are commands buffered
+     * in the jit state and dynasm doesn't support rip relative addressing.
+     *
+     * eg on 64 bit:
+     * 0-8: function ptr
+     * 8-14: jmp aword [rip-6]
      * 
-     * jmp aword [rip+2]
+     * for 32 bit we only set the function ptr as it can always fit in a 32
+     * bit displacement
      */
-    code[0] = 0xFF; /* FF /4 operand for jmp */
-    code[1] = 0x25; /* RIP displacement */
-    *(int32_t*) &code[2] = 2;
-    *(function_t*) &code[8] = func;
+#if defined _WIN64 || defined __amd64__
+    *(function_t*) code = func;
+    code[8] = 0xFF; /* FF /4 operand for jmp */
+    code[9] = 0x25; /* RIP displacement */
+    *(int32_t*) &code[10] = -6;
+    shred(code, 14, JUMP_SIZE);
 #else
-    /* this also needs to be done manually since we already have commands buffered up 
-     * jmp &func
-     */
-    code[0] = 0xE9;
-    *(int32_t*) &code[1] = (ptrdiff_t) func - (ptrdiff_t) code - 5;
+    *(function_t*) code = func;
+    shred(code, 4, JUMP_SIZE);
 #endif
 }
 
@@ -599,12 +623,12 @@ void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const 
         if (reg.regs < MAX_REGISTERS) {
             | mov rax, rsp
             | add rax, 32
-            | call_piip, &unpack_varargs_reg, L_ARG, nargs+1, MAX_REGISTERS - reg.regs, rax
+            | call_piip, extern unpack_varargs_reg, L_ARG, nargs+1, MAX_REGISTERS - reg.regs, rax
         }
 
         | mov rax, rsp
         | add rax, 32 + 8*MAX_REGISTERS
-        | call_pip, &unpack_varargs, L_ARG, nargs + 1 + MAX_REGISTERS - reg.regs, rax
+        | call_pip, extern unpack_varargs_stack, L_ARG, nargs + 1 + MAX_REGISTERS - reg.regs, rax
 
         for (i = nargs; i < 4; i++) {
             reg.is_int[i] = reg.is_float[i] = 1;
@@ -615,18 +639,18 @@ void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const 
         if (reg.floats < MAX_FLOAT_REGISTERS) {
             | mov rax, rsp
             | add rax, 32 + 8*(MAX_INT_REGISTERS + reg.floats)
-            | call_piip, &unpack_varargs_float, L_ARG, nargs+1, MAX_FLOAT_REGISTERS - reg.floats, rax
+            | call_piip, extern unpack_varargs_float, L_ARG, nargs+1, MAX_FLOAT_REGISTERS - reg.floats, rax
         }
 
         if (reg.ints < MAX_INT_REGISTERS) {
             | mov rax, rsp
             | add rax, 32 + 8*(reg.ints)
-            | call_piip, &unpack_varargs_int, L_ARG, nargs+1, MAX_INT_REGISTERS - reg.ints, rax
+            | call_piip, extern unpack_varargs_int, L_ARG, nargs+1, MAX_INT_REGISTERS - reg.ints, rax
         }
 
         | mov rax, rsp
         | add rax, reg.off
-        | call_piiip, &unpack_varargs_stack_skip, L_ARG, nargs+1, MAX_INT_REGISTERS - reg.ints, MAX_FLOAT_REGISTERS - reg.floats, rax
+        | call_piiip, extern unpack_varargs_stack_skip, L_ARG, nargs+1, MAX_INT_REGISTERS - reg.ints, MAX_FLOAT_REGISTERS - reg.floats, rax
         |.endif
 
         reg.floats = MAX_FLOAT_REGISTERS;
@@ -634,7 +658,7 @@ void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const 
 #else
         | mov rax, rsp
         | add rax, reg.off
-        | call_pip, &unpack_varargs, L_ARG, nargs+1, rax
+        | call_pip, extern unpack_varargs_stack, L_ARG, nargs+1, rax
 #endif
     }
 

@@ -54,10 +54,21 @@ int get_extern(jit_t* jit, uint8_t* addr, int idx, int type)
 {
     page_t* page = &jit->pages[jit->pagenum-1];
     addr += 4; /* compensate for room taken up for the offset so that we can work rip relative */
-    if (idx == jit->function_extern) {
-        return (int32_t)(page->data + page->off - addr);
-    } else {
+    if (idx == jit->errno_extern) {
         return (int32_t)(page->data + (idx * JUMP_SIZE) - addr);
+    } else {
+        uint8_t* jmp = (idx == jit->function_extern)
+                     ? (page->data + page->off)
+                     : (page->data + idx*JUMP_SIZE);
+
+        /* see if we can fit the offset in a 32bit displacement, if not use the jump instruction */
+        ptrdiff_t off = *(uint8_t**) jmp - addr;
+
+        if (INT32_MIN <= off && off <= INT32_MAX) {
+            return (int32_t) off;
+        } else {
+            return (int32_t)(jmp + sizeof(uint8_t*) - addr);
+        }
     }
 }
 
@@ -69,6 +80,7 @@ static void* reserve_code(jit_t* jit, lua_State* L, size_t sz)
 
     if (off + sz >= size) {
         int i;
+        function_t func;
 
         /* need to create a new page */
         jit->pages = (page_t*) realloc(jit->pages, (++jit->pagenum) * sizeof(page_t));
@@ -80,45 +92,47 @@ static void* reserve_code(jit_t* jit, lua_State* L, size_t sz)
 
         lua_newtable(L);
 
-#define ADDFUNC(name) \
-        lua_pushliteral(L, #name); \
-        lua_pushcfunction(L, (lua_CFunction) &name); \
+#define ADDFUNC(DLL, NAME) \
+        lua_pushliteral(L, #NAME); \
+        func = DLL ? (function_t) GetProcAddress(DLL, #NAME) : NULL; \
+        func = func ? func : (function_t) &NAME; \
+        lua_pushcfunction(L, (lua_CFunction) func); \
         lua_rawset(L, -3)
 
-        ADDFUNC(to_double);
-        ADDFUNC(to_uint64);
-        ADDFUNC(to_int64);
-        ADDFUNC(to_int32);
-        ADDFUNC(to_uint32);
-        ADDFUNC(to_uintptr);
-        ADDFUNC(to_enum);
-        ADDFUNC(to_typed_pointer);
-        ADDFUNC(to_typed_function);
-        ADDFUNC(unpack_varargs_stack);
-        ADDFUNC(unpack_varargs_stack_skip);
-        ADDFUNC(unpack_varargs_reg);
-        ADDFUNC(unpack_varargs_float);
-        ADDFUNC(unpack_varargs_int);
-        ADDFUNC(push_cdata);
-        ADDFUNC(push_uint);
-        ADDFUNC(SetLastError);
-        ADDFUNC(GetLastError);
-        ADDFUNC(luaL_error);
-        ADDFUNC(lua_pushnumber);
-        ADDFUNC(lua_pushboolean);
-        ADDFUNC(lua_gettop);
+        ADDFUNC(NULL, to_double);
+        ADDFUNC(NULL, to_uint64);
+        ADDFUNC(NULL, to_int64);
+        ADDFUNC(NULL, to_int32);
+        ADDFUNC(NULL, to_uint32);
+        ADDFUNC(NULL, to_uintptr);
+        ADDFUNC(NULL, to_enum);
+        ADDFUNC(NULL, to_typed_pointer);
+        ADDFUNC(NULL, to_typed_function);
+        ADDFUNC(NULL, unpack_varargs_stack);
+        ADDFUNC(NULL, unpack_varargs_stack_skip);
+        ADDFUNC(NULL, unpack_varargs_reg);
+        ADDFUNC(NULL, unpack_varargs_float);
+        ADDFUNC(NULL, unpack_varargs_int);
+        ADDFUNC(NULL, push_cdata);
+        ADDFUNC(NULL, push_uint);
+        ADDFUNC(jit->kernel32_dll, SetLastError);
+        ADDFUNC(jit->kernel32_dll, GetLastError);
+        ADDFUNC(jit->lua_dll, luaL_error);
+        ADDFUNC(jit->lua_dll, lua_pushnumber);
+        ADDFUNC(jit->lua_dll, lua_pushboolean);
+        ADDFUNC(jit->lua_dll, lua_gettop);
 #undef ADDFUNC
 
         for (i = 0; extnames[i] != NULL; i++) {
             if (strcmp(extnames[i], "FUNCTION") == 0) {
                 jit->function_extern = i;
-                memset(page->data + page->off, 0xCC, JUMP_SIZE);
+                shred(page->data + page->off, 0, JUMP_SIZE);
 
             } else if (strcmp(extnames[i], "ERRNO") == 0) {
                 compile_errno_load(jit, L, page->data + page->off);
+                jit->errno_extern = i;
 
             } else {
-                function_t func;
                 lua_getfield(L, -1, extnames[i]);
                 func = (function_t) lua_tocfunction(L, -1);
                 if (func == NULL) {
