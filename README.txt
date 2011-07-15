@@ -10,6 +10,10 @@ License
 -------
 MIT same as Lua 5.1
 
+Source
+------
+https://github.com/jmckaskill/luaffi
+
 Platforms
 ---------
 Currently supported:
