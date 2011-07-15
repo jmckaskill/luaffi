@@ -18,6 +18,15 @@ extern "C" {
 # define EXTERN_C extern
 #endif
 
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <errno.h>
+#include <unistd.h>
+#include <dlfcn.h>
+#include <sys/mman.h>
+#endif
+
 #ifndef NDEBUG
 #define DASM_CHECKS
 #endif
@@ -25,6 +34,7 @@ extern "C" {
 typedef struct jit_t jit_t;
 #define Dst_DECL	jit_t* Dst
 #define Dst_REF		(Dst->ctx)
+#define DASM_EXTERN(a,b,c,d) get_extern(a,b,c,d)
 
 #include "dynasm/dasm_proto.h"
 
@@ -66,6 +76,26 @@ static void luaL_setfuncs (lua_State *L, const luaL_Reg *l, int nup) {
 #endif
 
 
+#ifdef _WIN32
+#define LIB_FORMAT_1 "%s.dll"
+#define AllocPage(size) VirtualAlloc(NULL, size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE)
+#define FreePage(data, size) VirtualFree(data, 0, MEM_RELEASE)
+static void EnableExecute(void* data, size_t size, int enabled)
+{
+    DWORD oldprotect;
+    VirtualProtect(data, size, enabled ? PAGE_EXECUTE : PAGE_READWRITE, &oldprotect);
+}
+#else
+#define LIB_FORMAT_1 "%s.so"
+#define LIB_FORMAT_2 "lib%s.so"
+#define LoadLibraryA(name) dlopen(name, RTLD_NOW | RTLD_GLOBAL)
+#define GetProcAddress(lib, name) dlsym(lib, name)
+#define AllocPage(size) mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0)
+#define FreePage(data, size) munmap(data, size)
+#define EnableExecute(data, size, enabled) mprotect(data, size, enabled ? PROT_READ|PROT_EXEC : PROT_READ|PROT_WRITE)
+#endif
+
+
 typedef struct {
     int line;
     const char* next;
@@ -74,18 +104,20 @@ typedef struct {
 } parser_t;
 
 typedef struct {
-    char* data;
+    uint8_t* data;
     size_t size;
     size_t off;
 } page_t;
 
 struct jit_t {
+    lua_State* L;
     int32_t last_errno;
     dasm_State* ctx;
     size_t pagenum;
     page_t* pages;
     size_t align_page_size;
     void** globals;
+    int function_extern;
 };
 
 #define ALIGN(PTR, MASK) \
@@ -221,12 +253,10 @@ void push_type_name(lua_State* L, int usr, const ctype_t* ct);
 
 int ffi_cdef(lua_State* L);
 
-void* reserve_code(jit_t* jit, size_t sz);
-void commit_code(jit_t* jit, void* p, size_t sz);
-
 int x86_stack_required(lua_State* L, int usr);
 void push_function(jit_t* jit, lua_State* L, function_t f, int ct_usr, const ctype_t* ct);
 void compile_globals(jit_t* jit, lua_State* L);
+int get_extern(jit_t* jit, uint8_t* addr, int idx, int type);
 
 /* WARNING: assembly needs to be updated for prototype changes of these functions */
 double to_double(lua_State* L, int idx);
@@ -238,7 +268,11 @@ uintptr_t to_uintptr(lua_State* L, int idx);
 int32_t to_enum(lua_State* L, int idx, int to_usr, const ctype_t* tt);
 void* to_typed_pointer(lua_State* L, int idx, int to_usr, const ctype_t* tt);
 function_t to_typed_function(lua_State* L, int idx, int to_usr, const ctype_t* tt);
-void unpack_varargs(lua_State* L, int first, char* to);
+void unpack_varargs_stack(lua_State* L, int first, char* to);
+void unpack_varargs_stack_skip(lua_State* L, int first, int floats_to_skip, int ints_to_skip, char* to);
+void unpack_varargs_float(lua_State* L, int first, int left, char* to);
+void unpack_varargs_int(lua_State* L, int first, int left, char* to);
+void unpack_varargs_reg(lua_State* L, int first, int left, char* to);
 
 
 

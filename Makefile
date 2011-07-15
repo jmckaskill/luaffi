@@ -1,8 +1,8 @@
 .PHONY: all clean test
 
 LUA_CFLAGS=`pkg-config --cflags lua5.1`
-LUA=lua5.1
-CFLAGS=-fPIC -O2 -Wall $(LUA_CFLAGS) -fvisibility=hidden -Wno-unused-function
+LUA=../lua5.1/src/lua
+CFLAGS=-O2 -fPIC -Wall -Werror $(LUA_CFLAGS) -fvisibility=hidden -Wno-unused-function
 
 all: ffi.so
 

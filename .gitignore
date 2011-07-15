@@ -9,4 +9,4 @@ call_*.h
 /BuildLog.htm
 *.o
 *.so
-"*.swo" 
+.*.swo

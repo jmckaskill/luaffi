@@ -25,8 +25,8 @@
 			>
 			<Tool
 				Name="VCNMakeTool"
-				BuildCommandLine="msvcbuild.bat debug"
-				ReBuildCommandLine="msvcbuild.bat debug"
+				BuildCommandLine="msvcbuild.bat test"
+				ReBuildCommandLine="msvcbuild.bat test"
 				CleanCommandLine="msvcbuild.bat clean"
 				Output=""
 				PreprocessorDefinitions=""

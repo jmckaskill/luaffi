@@ -3,33 +3,6 @@
 #include <math.h>
 #include <inttypes.h>
 
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <sys/mman.h>
-#include <dlfcn.h>
-#include <unistd.h>
-#endif
-
-#ifdef _WIN32
-#define LIB_FORMAT_1 "%s.dll"
-#define AllocPage(size) VirtualAlloc(NULL, size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE)
-#define FreePage(data, size) VirtualFree(data, 0, MEM_RELEASE)
-static void EnableExecute(void* data, size_t size, int enabled)
-{
-    DWORD oldprotect;
-    VirtualProtect(data, size, enabled ? PAGE_EXECUTE : PAGE_READWRITE, &oldprotect);
-}
-#else
-#define LIB_FORMAT_1 "%s.so"
-#define LIB_FORMAT_2 "lib%s.so"
-#define LoadLibraryA(name) dlopen(name, RTLD_NOW | RTLD_GLOBAL)
-#define GetProcAddress(lib, name) dlsym(lib, name)
-#define AllocPage(size) mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0)
-#define FreePage(data, size) munmap(data, size)
-#define EnableExecute(data, size, enabled) mprotect(data, size, enabled ? PROT_READ|PROT_EXEC : PROT_READ|PROT_WRITE)
-#endif
-
 static int type_error(lua_State* L, int idx, const char* to_type, int to_usr, const ctype_t* to_ct)
 {
     luaL_Buffer B;
@@ -148,77 +121,130 @@ double to_double(lua_State* L, int idx)
 uintptr_t to_uintptr(lua_State* L, int idx)
 { TO_NUMBER(uintptr_t, 1); }
 
-void unpack_varargs(lua_State* L, int first, char* to)
+static size_t unpack_vararg(lua_State* L, int i, char* to)
 {
     void* p;
     ctype_t ct;
+
+    switch (lua_type(L, i)) {
+    case LUA_TBOOLEAN:
+        *(int*) to = lua_toboolean(L, i);
+        return sizeof(int);
+
+    case LUA_TNUMBER:
+        *(double*) to = lua_tonumber(L, i);
+        return sizeof(double);
+
+    case LUA_TSTRING:
+        *(const char**) to = lua_tostring(L, i);
+        return sizeof(const char*);
+
+    case LUA_TLIGHTUSERDATA:
+        *(void**) to = lua_touserdata(L, i);
+        return sizeof(void*);
+
+    case LUA_TUSERDATA:
+        p = to_cdata(L, i, &ct);
+
+        if (!p) {
+            *(void**) to = p;
+            return sizeof(void*);
+        }
+
+        lua_pop(L, 1);
+
+        if (ct.pointers || ct.type == UINTPTR_TYPE) {
+            *(void**) to = p;
+            return sizeof(void*);
+
+        } else if (ct.type == INT32_TYPE || ct.type == UINT32_TYPE) {
+            *(int32_t*) to = *(int32_t*) p;
+            return sizeof(int32_t);
+
+        } else if (ct.type == INT64_TYPE || ct.type == UINT64_TYPE) {
+            *(int64_t*) to = *(int64_t*) p;
+            return sizeof(int64_t);
+        }
+        goto err;
+
+    case LUA_TNIL:
+        *(void**) to = NULL;
+        return sizeof(void*);
+
+    default:
+        goto err;
+    }
+
+err:
+    return type_error(L, i, "vararg", 0, NULL);
+}
+
+void unpack_varargs_stack(lua_State* L, int first, char* to)
+{
     int i;
     int last = lua_gettop(L);
 
     for (i = first; i <= last; i++) {
-        switch (lua_type(L, i)) {
-        case LUA_TBOOLEAN:
-            *(int*) to = lua_toboolean(L, i);
-            to += sizeof(int);
-            break;
+        to += unpack_vararg(L, i, to);
+    }
+}
 
-        case LUA_TNUMBER:
-            *(double*) to = lua_tonumber(L, i);
+void unpack_varargs_stack_skip(lua_State* L, int first, int floats_to_skip, int ints_to_skip, char* to)
+{
+    int i;
+    int last = lua_gettop(L);
+
+    for (i = first; i <= last; i++) {
+        int type = lua_type(L, i);
+
+        if (type == LUA_TNUMBER && --floats_to_skip >= 0) {
+            continue;
+        } else if (type != LUA_TNUMBER && --ints_to_skip >= 0) {
+            continue;
+        }
+
+        to += unpack_vararg(L, i, to);
+    }
+}
+
+void unpack_varargs_float(lua_State* L, int first, int left, char* to)
+{
+    int i;
+    int last = lua_gettop(L);
+
+    for (i = first; i <= last && left > 0; i++) {
+        if (lua_type(L, i) == LUA_TNUMBER) {
+            unpack_vararg(L, i, to);
             to += sizeof(double);
-            break;
-
-        case LUA_TSTRING:
-            *(const char**) to = lua_tostring(L, i);
-            to += sizeof(const char*);
-            break;
-
-        case LUA_TLIGHTUSERDATA:
-            *(void**) to = lua_touserdata(L, i);
-            to += sizeof(void*);
-            break;
-
-        case LUA_TUSERDATA:
-            p = to_cdata(L, i, &ct);
-
-            if (!p) {
-                *(void**) to = p;
-                to += sizeof(void*);
-                break;
-            }
-
-            lua_pop(L, 1);
-
-            if (ct.pointers || ct.type == UINTPTR_TYPE) {
-                *(void**) to = p;
-                to += sizeof(void*);
-
-            } else if (ct.type == INT32_TYPE || ct.type == UINT32_TYPE) {
-                *(int32_t*) to = *(int32_t*) p;
-                to += sizeof(int32_t);
-
-            } else if (ct.type == INT64_TYPE || ct.type == UINT64_TYPE) {
-                *(int64_t*) to = *(int64_t*) p;
-                to += sizeof(int64_t);
-
-            } else {
-                goto err;
-            }
-            break;
-
-        case LUA_TNIL:
-            *(void**) to = NULL;
-            to += sizeof(void*);
-            break;
-
-        default:
-            goto err;
+            left--;
         }
     }
+}
 
-    return;
+void unpack_varargs_int(lua_State* L, int first, int left, char* to)
+{
+    int i;
+    int last = lua_gettop(L);
 
-err:
-    type_error(L, i, "vararg", 0, NULL);
+    for (i = first; i <= last && left > 0; i++) {
+        if (lua_type(L, i) != LUA_TNUMBER) {
+            unpack_vararg(L, i, to);
+            to += sizeof(void*);
+            left--;
+        }
+    }
+}
+
+void unpack_varargs_reg(lua_State* L, int first, int left, char* to)
+{
+    int i;
+    int last = lua_gettop(L);
+
+    for (i = first; i <= last && left > 0; i++) {
+        unpack_vararg(L, i, to);
+        to += sizeof(double);
+        left--;
+    }
 }
 
 int32_t to_enum(lua_State* L, int idx, int to_usr, const ctype_t* to_ct)
@@ -1339,11 +1365,13 @@ static int ffi_load(lua_State* L)
     const char* libname = luaL_checkstring(L, 1);
     void** lib = (void**) lua_newuserdata(L, sizeof(void*));
 
+    fprintf(stderr, "%s\n", libname);
     *lib = LoadLibraryA(libname);
 
 #ifdef LIB_FORMAT_1
     if (!*lib) {
         libname = lua_pushfstring(L, LIB_FORMAT_1, lua_tostring(L, 1));
+    fprintf(stderr, "%s\n", libname);
         *lib = LoadLibraryA(libname);
         lua_pop(L, 1);
     }
@@ -1352,6 +1380,7 @@ static int ffi_load(lua_State* L)
 #ifdef LIB_FORMAT_2
     if (!*lib) {
         libname = lua_pushfstring(L, LIB_FORMAT_2, lua_tostring(L, 1));
+    fprintf(stderr, "%s\n", libname);
         *lib = LoadLibraryA(libname);
         lua_pop(L, 1);
     }
@@ -1451,35 +1480,6 @@ static int jit_gc(lua_State* L)
     }
     free(jit->globals);
     return 0;
-}
-
-void* reserve_code(jit_t* jit, size_t sz)
-{
-    page_t* page;
-    size_t off = (jit->pagenum > 0) ? jit->pages[jit->pagenum-1].off : 0;
-    size_t size = (jit->pagenum > 0) ? jit->pages[jit->pagenum-1].size : 0;
-
-    if (off + sz >= size) {
-        /* need to create a new page */
-        jit->pages = (page_t*) realloc(jit->pages, (++jit->pagenum) * sizeof(page_t));
-        page = &jit->pages[jit->pagenum-1];
-
-        page->size = ALIGN(sz, jit->align_page_size);
-        page->off = 0;
-        page->data = (char*) AllocPage(page->size);
-    } else {
-        page = &jit->pages[jit->pagenum-1];
-        EnableExecute(page->data, page->size, 0);
-    }
-
-    return page->data + page->off;
-}
-
-void commit_code(jit_t* jit, void* p, size_t sz)
-{
-    page_t* page = &jit->pages[jit->pagenum-1];
-    page->off += sz;
-    EnableExecute(page->data, page->size, 1);
 }
 
 static const luaL_Reg cdata_mt[] = {

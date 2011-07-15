@@ -1,3 +1,4 @@
+io.stdout:setvbuf('no')
 local ffi = require 'ffi'
 local dlls = {ffi.load('test_cdecl')}
 
@@ -16,8 +17,8 @@ int32_t add_i32(int32_t a, int32_t b);
 uint32_t add_u32(uint32_t a, uint32_t b);
 int64_t add_i64(int64_t a, int64_t b);
 uint64_t add_u64(uint64_t a, uint64_t b);
-double add_i64(double a, double b);
-float add_u64(float a, float b);
+double add_d(double a, double b);
+float add_f(float a, float b);
 
 int print_i8(char* buf, int8_t val);
 int print_u8(char* buf, uint8_t val);
@@ -62,7 +63,7 @@ local test_values = {
 
 local buf = ffi.new('char[256]')
 
-local function checkbuf(type, ret)
+local function checkbuf(type, suffix, ret)
     local str = tostring(test_values[type]):gsub('^cdata%b<>: ', '')
     assert(ffi.string(buf) == str and ret == #str)
 end
@@ -76,17 +77,19 @@ for i,c in ipairs(dlls) do
     assert(c.add_u8(120,120) == 240)
     assert(c.add_u8(-1,0) == 255)
     assert(c.add_i16(2000,4000) == 6000)
+    assert(c.add_d(20, 12) == 32)
+    assert(c.add_f(40, 32) == 72)
 
     for suffix, type in pairs{d = 'double', f = 'float', u64 = 'uint64_t', u32 = 'uint32_t', u16 = 'uint16_t', s = 'const char*', p = 'void*'} do
         local test = test_values[type]
-        checkbuf(type, c['print_' .. suffix](buf, test))
+        checkbuf(type, suffix, c['print_' .. suffix](buf, test))
 
         if i == 1 then
             ffi.cdef(align:gsub('SUFFIX', suffix):gsub('TYPE', type):gsub('ALIGN', 0))
         end
 
         local v = ffi.new('struct align_0_' .. suffix, {0, test})
-        checkbuf(type, c['print_align_0_' .. suffix](buf, v))
+        checkbuf(type, suffix, c['print_align_0_' .. suffix](buf, v))
 
         for _,align in ipairs{1,2,4,8,16} do
             if i == 1 then
@@ -94,7 +97,7 @@ for i,c in ipairs(dlls) do
             end
 
             local v = ffi.new('struct align_' .. align .. '_' .. suffix, {0, test})
-            checkbuf(type, c['print_align_' .. align .. '_' .. suffix](buf, v))
+            checkbuf(type, suffix, c['print_align_' .. align .. '_' .. suffix](buf, v))
         end
     end
 end
