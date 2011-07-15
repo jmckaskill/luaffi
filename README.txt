@@ -76,6 +76,7 @@ Todo
 - C++ classes (excluding inline c++ functions)
 - All the various gcc and msvc attributes
 - Finish and test windows X64 and OSX support
+- ffi.metatable
 
 How it works
 ------------
