@@ -12,17 +12,39 @@ MIT same as Lua 5.1
 
 Platforms
 ---------
-Currently only windows x86 and linux x86 are supported.
+Currently supported:
+- windows x86
+- linux x86
+- linux x64
+
+OSX and windows x64 support are almost done, but I currently have no way of
+building and/or testing them.
+
+Currently only dll builds are supported (ie no static).
 
 Runs with both Lua 5.1 and Lua 5.2 beta.
 
 Build
 -----
-To build run msvcbuild.bat in a visual studio cmd prompt (or 'msvcbuild.bat
-debug' for a debug dll)
 
-Edit msvcbuild.bat if your lua exe, lib, or lua include path differ from Lua
-5.1 for windows.
+On windows use msvcbuild.bat in a visual studio cmd prompt. Available targets are:
+- nothing or release: default release build
+- debug: debug build
+- test: build and run the test debug build
+- test-release: build and run the test release build
+- clean: cleanup object files
+
+Edit msvcbuild.bat if your lua exe, lib, lua include path, or lua dll name
+differ from Lua 5.1 for windows.
+
+On posix use make. Available targets are:
+- nothing or all: default release build
+- debug: debug build
+- test: build and run the test build
+- clean: cleanup object files
+
+Edit the Makefile if your lua exe differs from `lua5.1` or if you can't get
+the include and lib arguments from pkg-config.
 
 Known Issues
 ------------
@@ -36,7 +58,7 @@ Known Issues
   unfixable with the current metamethod semantics. Instead use ffi.C.NULL
 - Constant expressions can't handle non integer intermediate values (eg
   offsetof won't work because it manipulates pointers)
-- Not all metamethods work with lua 5.1 (eg void* + number). This is due to
+- Not all metamethods work with lua 5.1 (eg char* + number). This is due to
   the way metamethods are looked up with mixed types in Lua 5.1. If you need
 this upgrade to Lua 5.2 or use boxed numbers (uint64_t and uintptr_t).
 
@@ -49,6 +71,7 @@ Todo
 - static const int
 - C++ classes (excluding inline c++ functions)
 - All the various gcc and msvc attributes
+- Finish and test windows X64 and OSX support
 
 How it works
 ------------
@@ -74,8 +97,6 @@ using dynasm (see call_x86.dasc). The JITed code does the following in order:
 1. Calls the needed unpack functions in ffi.c placing each argument on the HW stack
 2. Updates errno
 3. Performs the c call 
-4. Retries errno
+4. Retrieves errno
 5. Pushes the result back into lua from the HW register or stack
-
-
 
