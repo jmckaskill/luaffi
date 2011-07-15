@@ -252,12 +252,13 @@ int x86_stack_required(lua_State* L, int usr)
     return ret;
 }
 
-#if defined _WIN32 && defined _WIN64
-#define MAX_REGISTER_ARGS 4 /* rcx, rdx, r8, r9 */
-#elif defined __amd64__
-#define MAX_REGISTER_ARGS 14 /* rdi, rsi, rdx, rcx, r8, r9, xmm0-7 */
-#else
-#define MAX_REGISTER_ARGS 0
+#ifdef _WIN64
+#define MAX_REGISTERS 4 /* rcx, rdx, r8, r9 */
+#endif
+
+#ifdef __amd64__
+#define MAX_INT_REGISTERS 6 /* rdi, rsi, rdx, rcx, r8, r9 */
+#define MAX_FLOAT_REGISTERS 8 /* xmm0-7 */
 #endif
 
 struct reg_alloc {
@@ -551,7 +552,7 @@ void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const 
     | call_i, &SetLastError, eax
 
     /* remove the stack space to call local functions */
-    |.if WIN and not X64
+    |.if X32WIN
     | add rsp, 28 // SetLastError will have already popped 4
     |.else
     | add rsp, 32
@@ -589,6 +590,7 @@ void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const 
             | mov rcx, [rsp]
         }
     case 0:
+        break;
     }
 
     /* don't remove the space for the registers as we need 32 bytes of register overflow space */
@@ -614,6 +616,7 @@ void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const 
     case 1:
         | movq xmm0, qword [rsp + 8*(MAX_INT_REGISTERS)]
     case 0:
+        break;
     }
 
     switch (regs.ints) {
@@ -630,6 +633,7 @@ void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const 
     case 1:
         | mov rdi, [rsp]
     case 0:
+        break;
     }
 
     | add rsp, REGISTER_STACK_SPACE

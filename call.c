@@ -27,6 +27,7 @@ static void* compile(Dst_DECL, lua_State* L)
     }
 
     commit_code(Dst, code, codesz);
+    fprintf(stderr, "%.*s", (int) codesz, (char*) code);
     return code;
 }
 
@@ -39,4 +40,12 @@ static void SetLastError(int err)
 
 
 #include "dynasm/dasm_x86.h"
+
+#ifdef _WIN64
+#include "call_x64win.h"
+#elif defined __amd64__
+#include "call_x64.h"
+#else
 #include "call_x86.h"
+#endif
+
