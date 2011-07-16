@@ -181,7 +181,7 @@ static void compile_extern_jump(jit_t* jit, lua_State* L, function_t func, uint8
     *(function_t*) code = func;
     code[8] = 0xFF; /* FF /4 operand for jmp */
     code[9] = 0x25; /* RIP displacement */
-    *(int32_t*) &code[10] = -6;
+    *(int32_t*) &code[10] = -14;
     shred(code, 14, JUMP_SIZE);
 #else
     *(function_t*) code = func;
