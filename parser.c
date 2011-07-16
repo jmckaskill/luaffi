@@ -446,7 +446,7 @@ static void parse_record(lua_State* L, parser_t* P, ctype_t* type)
 
                 /* increase the outer struct/union alignment if needed */
                 if (type->align_mask < malign) {
-                    type->align_mask = malign;
+                    type->align_mask = (unsigned int) malign;
                 }
 
                 /* increase the union size if needed */
@@ -487,7 +487,7 @@ static void parse_record(lua_State* L, parser_t* P, ctype_t* type)
                     if (type->type == STRUCT_TYPE && mtype.type == STRUCT_TYPE) {
                         size_t i, sublen = lua_rawlen(L, -1);
                         for (i = 0; i < sublen; i++) {
-                            lua_rawgeti(L, -1, i);
+                            lua_rawgeti(L, -1, (int) i);
                             lua_rawseti(L, ct_usr, midx++);
                         }
                     }
@@ -874,7 +874,7 @@ static void push_function_type_string(lua_State* L, int usr, const ctype_t* ct)
             luaL_addstring(&B, ", ");
         }
 
-        lua_rawgeti(L, usr, i);
+        lua_rawgeti(L, usr, (int) i);
         lua_replace(L, top+1);
         lua_getuservalue(L, top+1);
         lua_replace(L, top+2);
@@ -1255,7 +1255,7 @@ static int parse_root(lua_State* L, parser_t* P)
 
             } else if (tok.type == TOK_TOKEN && IS_LITERAL(tok, "push")) {
                 int line = P->line;
-                int previous_alignment = P->align_mask;
+                size_t previous_alignment = P->align_mask;
 
                 check_token(L, P, TOK_CLOSE_PAREN, "", "invalid pack directive on line %d", P->line);
 

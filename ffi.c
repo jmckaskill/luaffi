@@ -479,7 +479,7 @@ static void set_array(lua_State* L, int idx, void* to, int to_usr, const ctype_t
              * equiv index in the table initializer */
             lua_pop(L, 1);
             for (i = 0; i < tt->array_size; i++) {
-                lua_rawgeti(L, idx, i+1);
+                lua_rawgeti(L, idx, (int) (i+1));
 
                 if (lua_isnil(L, -1)) {
                     /* we've hit the end of the values provided in the

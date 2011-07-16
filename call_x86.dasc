@@ -315,7 +315,7 @@ int x86_stack_required(lua_State* L, int usr)
     int ret = 0;
     for (i = 1; i <= argn; i++) {
         const ctype_t* ct;
-        lua_rawgeti(L, usr, i);
+        lua_rawgeti(L, usr, (int) i);
         ct = (const ctype_t*) lua_touserdata(L, -1);
 
         if (ct->pointers) {
@@ -517,7 +517,7 @@ void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const 
     | sub rsp, 32 + REGISTER_STACK_SPACE // reserve an extra 32 to call local functions
 
     for (i = 1; i <= nargs; i++) {
-        lua_rawgeti(L, ct_usr, i);
+        lua_rawgeti(L, ct_usr, (int) i);
         mbr_ct = (const ctype_t*) lua_touserdata(L, -1);
         
         if (mbr_ct->pointers) {
@@ -630,10 +630,10 @@ void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const 
         | add rax, 32 + 8*MAX_REGISTERS
         | call_pip, extern unpack_varargs_stack, L_ARG, nargs + 1 + MAX_REGISTERS - reg.regs, rax
 
-        for (i = nargs; i < 4; i++) {
+        for (i = nargs; i < MAX_REGISTERS; i++) {
             reg.is_int[i] = reg.is_float[i] = 1;
         }
-        reg.regs = 4;
+        reg.regs = MAX_REGISTERS;
 #elif defined __amd64__
         |.elif X64
         if (reg.floats < MAX_FLOAT_REGISTERS) {
