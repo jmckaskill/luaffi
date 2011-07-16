@@ -43,9 +43,12 @@ void set_defined(lua_State* L, int ct_usr, ctype_t* ct)
 
         while (lua_next(L, -2)) {
             ctype_t* upd = (ctype_t*) lua_touserdata(L, -2);
-            upd->size = ct->size;
+            upd->base_size = ct->base_size;
             upd->align_mask = ct->align_mask;
             upd->is_defined = 1;
+            upd->is_variable_struct = ct->is_variable_struct;
+            upd->variable_increment = ct->variable_increment;
+            assert(!upd->variable_size_known);
             lua_pop(L, 1);
         }
 
@@ -80,25 +83,31 @@ void push_ctype(lua_State* L, int ct_usr, const ctype_t* ct)
     }
 }
 
+size_t ctype_size(lua_State* L, const ctype_t* ct)
+{
+    if (ct->pointers - ct->is_array) {
+        return sizeof(void*) * (ct->is_array ? ct->array_size : 1);
+
+    } else if (!ct->is_defined || ct->type == VOID_TYPE) {
+        return luaL_error(L, "can't calculate size of an undefined type");
+
+    } else if (ct->variable_size_known) {
+        assert(ct->is_variable_struct && !ct->is_array);
+        return ct->base_size + ct->variable_increment;
+
+    } else if (ct->is_variable_array || ct->is_variable_struct) {
+        return luaL_error(L, "internal error: calc size of variable type with unknown size");
+
+    } else {
+        return ct->base_size * (ct->is_array ? ct->array_size : 1);
+    }
+}
+
 void* push_cdata(lua_State* L, int ct_usr, const ctype_t* ct)
 {
     cdata_t* cd;
-    size_t sz;
+    size_t sz = ct->is_reference ? sizeof(void*) : ctype_size(L, ct);
     ct_usr = lua_absindex(L, ct_usr);
-
-    if (ct->type == VOID_TYPE && ct->pointers - ct->is_array == 0) {
-        luaL_error(L, "can't create cdata of type void");
-    } else if (!ct->is_defined && ct->pointers - ct->is_array == 0) {
-        luaL_error(L, "can't create cdata for an undefined type");
-    }
-
-    if (ct->is_reference) {
-        sz = sizeof(void*);
-    } else if (ct->pointers - ct->is_array) {
-        sz = sizeof(void*) * ct->array_size;
-    } else {
-        sz = ct->size * ct->array_size;
-    }
 
     cd = (cdata_t*) lua_newuserdata(L, sizeof(cdata_t) + sz);
     *(ctype_t*) &cd->type = *ct;

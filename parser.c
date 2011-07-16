@@ -379,6 +379,8 @@ static void parse_record(lua_State* L, parser_t* P, ctype_t* type)
             require_token(L, P, &tok);
             if (tok.type == TOK_CLOSE_CURLY) {
                 break;
+            } else if (type->is_variable_struct) {
+                luaL_error(L, "can't have members after a variable sized member on line %d", P->line);
             } else {
                 put_back(P);
             }
@@ -403,7 +405,7 @@ static void parse_record(lua_State* L, parser_t* P, ctype_t* type)
                 assert(lua_gettop(L) == top + 3);
 
                 if (!mtype.is_defined && (mtype.pointers - mtype.is_array) == 0) {
-                    luaL_error(L, "member type is undefined at line %d", P->line);
+                    luaL_error(L, "member type is undefined on line %d", P->line);
                 }
 
                 if (mtype.type == VOID_TYPE && (mtype.pointers - mtype.is_array) == 0) {
@@ -411,7 +413,31 @@ static void parse_record(lua_State* L, parser_t* P, ctype_t* type)
                 }
 
                 malign = (mtype.pointers - mtype.is_array) ? PTR_ALIGN_MASK : mtype.align_mask;
-                msize = ((mtype.pointers - mtype.is_array) ? sizeof(void*) : mtype.size) * mtype.array_size;
+
+                if ((mtype.is_variable_struct || mtype.is_variable_array) && type->type != STRUCT_TYPE) {
+                    luaL_error(L, "NYI: variable sized members in unions");
+                }
+
+
+                if (mtype.is_variable_array) {
+                    msize = 0;
+                    type->is_variable_struct = 1;
+                    type->variable_increment = mtype.pointers > 1 ? sizeof(void*) : mtype.base_size;
+
+                } else if (mtype.is_variable_struct) {
+                    assert(!mtype.variable_size_known);
+                    msize = mtype.base_size;
+                    type->is_variable_struct = 1;
+                    type->variable_increment = mtype.variable_increment;
+
+                } else if (mtype.is_array) {
+                    msize = mtype.array_size * (mtype.pointers ? sizeof(void*) : mtype.base_size);
+
+                } else {
+                    msize = mtype.pointers ? sizeof(void*) : mtype.base_size;
+                }
+
+
 
                 /* P->align_mask specifies the max alignment due to the current pack setting */
                 if (malign > P->align_mask) {
@@ -424,14 +450,14 @@ static void parse_record(lua_State* L, parser_t* P, ctype_t* type)
                 }
 
                 /* increase the union size if needed */
-                if (type->type == UNION_TYPE && type->size < msize) {
-                    type->size = msize;
+                if (type->type == UNION_TYPE && type->base_size < msize) {
+                    type->base_size = msize;
                 }
 
                 /* set the mbr offset and increase the struct size */
                 if (type->type == STRUCT_TYPE) {
-                    mtype.offset = ALIGN(type->size, malign);
-                    type->size = mtype.offset + msize;
+                    mtype.offset = ALIGN(type->base_size, malign);
+                    type->base_size = mtype.offset + msize;
                 }
 
 
@@ -499,6 +525,8 @@ static void parse_record(lua_State* L, parser_t* P, ctype_t* type)
                     break;
                 } else if (tok.type != TOK_COMMA) {
                     luaL_error(L, "unexpected token in struct definition on line %d", P->line);
+                } else if (type->is_variable_struct) {
+                    luaL_error(L, "can't have members after a variable sized member on line %d", P->line);
                 }
             }
 
@@ -507,11 +535,11 @@ static void parse_record(lua_State* L, parser_t* P, ctype_t* type)
         }
 
         /* only void is allowed 0 size */
-        if (type->size == 0) {
-            type->size = 1;
+        if (type->base_size == 0) {
+            type->base_size = 1;
         }
 
-        type->size = ALIGN(type->size, type->align_mask);
+        type->base_size = ALIGN(type->base_size, type->align_mask);
     }
 
     assert(lua_gettop(L) == top + 1);
@@ -530,7 +558,6 @@ void parse_type(lua_State* L, parser_t* P, ctype_t* type)
     int top = lua_gettop(L);
 
     memset(type, 0, sizeof(*type));
-    type->array_size = 1;
 
     require_token(L, P, &tok);
 
@@ -916,7 +943,6 @@ static void parse_function_arguments(lua_State* L, parser_t* P, ctype_t* ftype, 
 
             /* array arguments are just treated as their base pointer type */
             arg_type.is_array = 0;
-            arg_type.array_size = 1;
 
             /* check for the c style int func(void) and error on other uses of arguments of type void */
             if (arg_type.type == VOID_TYPE && arg_type.pointers == 0) {
@@ -976,12 +1002,9 @@ static void parse_function_arguments(lua_State* L, parser_t* P, ctype_t* ftype, 
  * eg for const void* bar[3] the base type is void with the subtype so far of
  * const, this parses the "* bar[3]" and updates the type argument
  *
- * array size is -1 for no array, INT_MAX for variable sized
- * name->type == TOK_NIL for no name or TOK_TOKEN for a name
- *
  * ct_usr and type must be as filled out by parse_type
  * 
- * leaves the type user value on the top of the stack
+ * pushes the updated user value on the top of the stack
  */
 const char* parse_argument(lua_State* L, parser_t* P, int ct_usr, ctype_t* type, size_t* namesz)
 {
@@ -1008,8 +1031,7 @@ const char* parse_argument(lua_State* L, parser_t* P, int ct_usr, ctype_t* type,
             ctype_t ret_type = *type;
 
             memset(type, 0, sizeof(*type));
-            type->size = sizeof(void (*)());
-            type->array_size = 1;
+            type->base_size = sizeof(void (*)());
             type->align_mask = FUNCTION_ALIGN_MASK;
             type->type = FUNCTION_TYPE;
             type->calling_convention = ret_type.calling_convention;
@@ -1063,8 +1085,7 @@ const char* parse_argument(lua_State* L, parser_t* P, int ct_usr, ctype_t* type,
                 }
 
                 /* function declarations and single function pointers are just
-                 * FUNCTION_TYPE, since sizeof(void*) != sizeof(void (*)()) on
-                 * all platforms
+                 * FUNCTION_TYPE
                  */
                 if (type->pointers > 0) {
                     type->pointers--;
@@ -1082,8 +1103,18 @@ const char* parse_argument(lua_State* L, parser_t* P, int ct_usr, ctype_t* type,
             type->pointers++;
             require_token(L, P, &tok);
 
+            if (type->pointers == 1 && !type->is_defined) {
+                luaL_error(L, "array of undefined type on line %d", P->line);
+            }
+
+            if (type->is_variable_struct || type->is_variable_array) {
+                luaL_error(L, "can't have an array of a variably sized type on line %d", P->line);
+            }
+
             if (tok.type == TOK_QUESTION) {
-                luaL_error(L, "NYI variable arrays on line %d", P->line);
+                type->is_variable_array = 1;
+                type->variable_increment = (type->pointers > 1) ? sizeof(void*) : type->base_size;
+
             } else {
                 int64_t asize;
                 put_back(P);
@@ -1160,6 +1191,8 @@ static void parse_typedef(lua_State* L, parser_t* P)
 
         if (!name) {
             luaL_error(L, "Can't have a typedef without a name on line %d", P->line);
+        } else if (arg_type.is_variable_array) {
+            luaL_error(L, "Can't typedef a variable length array on line %d", P->line);
         }
 
         lua_pushlstring(L, name, namesz);
@@ -1371,11 +1404,6 @@ static int64_t calculate_constant2(lua_State* L, parser_t* P, token_t* tok)
 
         parse_type(L, P, &type);
         parse_argument(L, P, -1, &type, NULL);
-
-        if (!type.is_defined) {
-            luaL_error(L, "can't use sizeof on an undefined type at line %d", P->line);
-        }
-
         lua_pop(L, 2);
 
         require_token(L, P, tok);
@@ -1385,7 +1413,7 @@ static int64_t calculate_constant2(lua_State* L, parser_t* P, token_t* tok)
 
         next_token(L, P, tok);
 
-        return type.size * type.array_size;
+        return ctype_size(L, &type);
 
     } else {
         return calculate_constant1(L, P, tok);

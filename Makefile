@@ -4,11 +4,10 @@ LUA_CFLAGS=`pkg-config --cflags lua5.1`
 LUA=lua5.1
 CFLAGS=-O2 -fPIC -Wall -Werror $(LUA_CFLAGS) -fvisibility=hidden -Wno-unused-function
 
-all: ffi.so
+all: ffi.so test_cdecl.so
 
 clean: 
 	rm -f *.o *.so call_*.h
-	dos2unix *.h *.c *.dasc *.txt
 
 call_x86.h: call_x86.dasc
 	$(LUA) dynasm/dynasm.lua -LN -o $@ $<

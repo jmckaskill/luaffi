@@ -214,9 +214,17 @@ enum {
  * definition then it needs to be copied over in ctype.c for when we create
  * types based off of the declaration alone */
 typedef struct ctype_t {
-    size_t size;
+    size_t base_size; /* size of the base type */
+    union {
+        /* Valid if is_array and not is_variable_struct and not is_variable_array */
+        size_t array_size;
+        /* Valid for is_variable_struct or is_variable_array. If
+         * variable_size_known (only used for is_variable_struct) then this is
+         * the total increment otherwise this is the per element increment
+         */
+        size_t variable_increment;
+    };
     size_t offset;
-    size_t array_size;
     unsigned int align_mask : 4; /* as align bytes - 1 eg 7 gives 8 byte alignment */
     unsigned int pointers : 4;
     unsigned int type : 5;
@@ -225,6 +233,9 @@ typedef struct ctype_t {
     unsigned int calling_convention : 2;
     unsigned int is_defined : 1;
     unsigned int has_var_arg : 1;
+    unsigned int is_variable_struct : 1;
+    unsigned int is_variable_array : 1;
+    unsigned int variable_size_known : 1;
 } ctype_t;
 
 typedef union cdata_t cdata_t;
@@ -249,6 +260,7 @@ void* push_cdata(lua_State* L, int ct_usr, const ctype_t* ct);
 void check_ctype(lua_State* L, int idx, ctype_t* ct);
 void* to_cdata(lua_State* L, int idx, ctype_t* ct);
 void* check_cdata(lua_State* L, int idx, ctype_t* ct);
+size_t ctype_size(lua_State* L, const ctype_t* ct);
 
 void parse_type(lua_State* L, parser_t* P, ctype_t* type);
 const char* parse_argument(lua_State* L, parser_t* P, int ct_usr, ctype_t* type, size_t* namesz);

@@ -108,5 +108,23 @@ assert(c.sprintf(buf, "%g", 5.3) == 3 and ffi.string(buf) == '5.3')
 assert(c.sprintf(buf, "%d", false) == 1 and ffi.string(buf) == '0')
 assert(c.sprintf(buf, "%d%g", false, 6.7) == 4 and ffi.string(buf) == '06.7')
 
+assert(ffi.sizeof('uint32_t[?]', 32) == 32 * 4)
+assert(ffi.sizeof(ffi.new('uint32_t[?]', 32)) == 32 * 4)
+
+ffi.cdef [[
+struct vls {
+    struct {
+        char a;
+        struct {
+            char b;
+            char v[?];
+        } c;
+    } d;
+};
+]]
+
+assert(ffi.sizeof('struct vls', 3) == 5)
+assert(ffi.sizeof(ffi.new('struct vls', 4).d.c) == 5)
+
 print('Test PASSED')
 

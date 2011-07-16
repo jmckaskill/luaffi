@@ -14,8 +14,8 @@
 @set DO_MT=mt /nologo
 
 @if "%1"=="debug" goto :COMPILE
-@if "%1"=="clean" goto :CLEAN
 @if "%1"=="test" goto :COMPILE
+@if "%1"=="clean" goto :CLEAN
 
 :RELEASE
 @set DO_CL=cl.exe /nologo /c /MD /Ox /W3 /Zi /WX /D_CRT_SECURE_NO_DEPRECATE /I"msvc"
@@ -30,11 +30,7 @@
 %DO_LINK% /DLL /OUT:ffi.dll "%LUA_LIB%" *.obj
 if exist ffi.dll.manifest^
     %DO_MT% -manifest ffi.dll.manifest -outputresource:"ffi.dll;2"
-@if "%1"=="test" goto :TEST
-@if "%1"=="test-release" goto :TEST
-@goto :CLEAN_OBJ
 
-:TEST
 %DO_CL% /Gd test.c /Fo"test_cdecl.obj"
 %DO_CL% /Gz test.c /Fo"test_stdcall.obj"
 %DO_LINK% /DLL /OUT:test_cdecl.dll test_cdecl.obj
@@ -44,13 +40,14 @@ if exist test_cdecl.dll.manifest^
 if exist test_stdcall.dll.manifest^
     %DO_MT% -manifest test_stdcall.dll.manifest -outputresource:"test_stdcall.dll;2"
 
-%LUA_EXE% test.lua
+@if "%1"=="test" %LUA_EXE% test.lua
+@if "%1"=="test-release" %LUA_EXE% test.lua
 @goto :CLEAN_OBJ
 
 :CLEAN
-del *.exe
+del *.dll
 :CLEAN_OBJ
-del *.obj *.manifest test_*.dll
+del *.obj *.manifest
 @goto :END
 
 :FAIL
