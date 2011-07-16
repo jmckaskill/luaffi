@@ -622,7 +622,7 @@ void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const 
         |.if X64WIN
         if (reg.regs < MAX_REGISTERS) {
             | mov rax, rsp
-            | add rax, 32
+            | add rax, 32 + 8*(reg.regs)
             | call_piip, extern unpack_varargs_reg, L_ARG, nargs+1, MAX_REGISTERS - reg.regs, rax
         }
 
