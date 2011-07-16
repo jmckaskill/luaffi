@@ -33,6 +33,88 @@ int print_d(char* buf, double val);
 int print_f(char* buf, float val);
 int print_p(char* buf, void* val);
 int sprintf(char* buf, const char* format, ...);
+
+// Examples from MSDN
+
+// bit_fields1.cpp
+// compile with: /LD
+struct Date {
+   unsigned short nWeekDay  : 3;    // 0..7   (3 bits)
+   unsigned short nMonthDay : 6;    // 0..31  (6 bits)
+   unsigned short nMonth    : 5;    // 0..12  (5 bits)
+   unsigned short nYear     : 8;    // 0..100 (8 bits)
+};
+
+// bit_fields2.cpp
+// compile with: /LD
+struct Date2 {
+   unsigned nWeekDay  : 3;    // 0..7   (3 bits)
+   unsigned nMonthDay : 6;    // 0..31  (6 bits)
+   unsigned           : 0;    // Force alignment to next boundary.
+   unsigned nMonth    : 5;    // 0..12  (5 bits)
+   unsigned nYear     : 8;    // 0..100 (8 bits)
+};
+
+// Examples from SysV X86 ABI
+struct sysv1 {
+    int     j:5;
+    int     k:6;
+    int     m:7;
+};
+
+struct sysv2 {
+    short   s:9;
+    int     j:9;
+    char    c;
+    short   t:9;
+    short   u:9;
+    char    d;
+};
+
+struct sysv3 {
+    char    c;
+    short   s:8;
+};
+
+union sysv4 {
+    char    c;
+    short   s:8;
+};
+
+struct sysv5 {
+    char    c;
+    int     :0;
+    char    d;
+    short   :9;
+    char    e;
+    char    :0;
+};
+
+struct sysv6 {
+    char    c;
+    int     :0;
+    char    d;
+    int     :9;
+    char    e;
+};
+
+struct sysv7 {
+    int     j:9;
+    short   s:9;
+    char    c;
+    short   t:9;
+    short   u:9;
+};
+
+int print_date(size_t* sz, size_t* align, char* buf, struct Date* s);
+int print_date2(size_t* sz, size_t* align, char* buf, struct Date2* s);
+int print_sysv1(size_t* sz, size_t* align, char* buf, struct sysv1* s);
+int print_sysv2(size_t* sz, size_t* align, char* buf, struct sysv2* s);
+int print_sysv3(size_t* sz, size_t* align, char* buf, struct sysv3* s);
+int print_sysv4(size_t* sz, size_t* align, char* buf, union sysv4* s);
+int print_sysv5(size_t* sz, size_t* align, char* buf, struct sysv5* s);
+int print_sysv6(size_t* sz, size_t* align, char* buf, struct sysv6* s);
+int print_sysv7(size_t* sz, size_t* align, char* buf, struct sysv7* s);
 ]]
 
 local align = [[
@@ -100,6 +182,25 @@ for i,c in ipairs(dlls) do
             checkbuf(type, suffix, c['print_align_' .. align .. '_' .. suffix](buf, v))
         end
     end
+
+    local psz = ffi.new('size_t[1]')
+    local palign = ffi.new('size_t[1]')
+    local function check(type, test, ret)
+        assert(ret == #test)
+        assert(test == ffi.string(buf))
+        assert(tonumber(psz[0]) == ffi.sizeof(type))
+        assert(tonumber(palign[0]) == ffi.alignof(type))
+    end
+
+    check('struct Date', '1 2 3 4', c.print_date(psz, palign, buf, {1,2,3,4}))
+    check('struct Date2', '1 2 3 4', c.print_date2(psz, palign, buf, {1,2,3,4}))
+    check('struct sysv1', '1 2 3', c.print_sysv1(psz, palign, buf, {1,2,3}))
+    check('struct sysv2', '1 2 3 4 5 6', c.print_sysv2(psz, palign, buf, {1,2,3,4,5,6}))
+    check('struct sysv3', '1 2', c.print_sysv3(psz, palign, buf, {1,2}))
+    check('union sysv4', '1', c.print_sysv4(psz, palign, buf, {1}))
+    check('struct sysv5', '1 2 3', c.print_sysv5(psz, palign, buf, {1,2,3}))
+    check('struct sysv6', '1 2 3', c.print_sysv6(psz, palign, buf, {1,2,3}))
+    check('struct sysv7', '1 2 3 4 5', c.print_sysv7(psz, palign, buf, {1,2,3,4,5}))
 end
 
 local c = ffi.C
@@ -125,6 +226,8 @@ struct vls {
 
 assert(ffi.sizeof('struct vls', 3) == 5)
 assert(ffi.sizeof(ffi.new('struct vls', 4).d.c) == 5)
+
+
 
 print('Test PASSED')
 

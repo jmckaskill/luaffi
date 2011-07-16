@@ -225,6 +225,13 @@ int64_t calculate_constant(lua_State* L, parser_t* P);
 static int g_name_key;
 static int g_next_unnamed_key;
 
+#ifndef max
+#define max(a,b) ((a) < (b) ? (b) : (a))
+#endif
+
+#ifndef min
+#define min(a,b) ((a) < (b) ? (a) : (b))
+#endif
 
 /* this parses a struct or union starting with the optional
  * name before the opening brace
@@ -262,7 +269,10 @@ static void parse_record(lua_State* L, parser_t* P, ctype_t* type)
             const ctype_t* prevt = (const ctype_t*) lua_touserdata(L, -1);
 
             if (prevt->type != type->type) {
-                luaL_error(L, "type %.*s previously declared as a different type", (int) tok.size, tok.str);
+                lua_getuservalue(L, -1);
+                push_type_name(L, -1, type);
+                push_type_name(L, -2, prevt);
+                luaL_error(L, "type '%s' previously declared as '%s'", lua_tostring(L, -2), lua_tostring(L, -1));
             }
 
             *type = *prevt;
@@ -368,6 +378,8 @@ static void parse_record(lua_State* L, parser_t* P, ctype_t* type)
 
     } else {
         int midx = 1;
+        size_t bit_offset = 0;
+        size_t bits_left = 0;
 
         /* parse members */
         for (;;) {
@@ -396,9 +408,14 @@ static void parse_record(lua_State* L, parser_t* P, ctype_t* type)
             parse_type(L, P, &mbase);
 
             for (;;) {
-                size_t malign, msize, mnamesz;
+                unsigned malign, pack_align;
+                size_t mnamesz;
                 ctype_t mtype = mbase;
                 const char* mname;
+
+                if (type->is_variable_struct) {
+                    luaL_error(L, "can't have members after a variable sized member on line %d", P->line);
+                }
 
                 assert(lua_gettop(L) == top + 2);
                 mname = parse_argument(L, P, -1, &mtype, &mnamesz);
@@ -413,59 +430,147 @@ static void parse_record(lua_State* L, parser_t* P, ctype_t* type)
                 }
 
                 malign = (mtype.pointers - mtype.is_array) ? PTR_ALIGN_MASK : mtype.align_mask;
+                pack_align = min(P->align_mask, malign);
 
-                if ((mtype.is_variable_struct || mtype.is_variable_array) && type->type != STRUCT_TYPE) {
-                    luaL_error(L, "NYI: variable sized members in unions");
-                }
+                if (type->type == UNION_TYPE) {
+                    size_t msize;
 
+                    if (mtype.is_variable_struct || mtype.is_variable_array) {
+                        luaL_error(L, "NYI: variable sized members in unions");
+                        return;
 
-                if (mtype.is_variable_array) {
-                    msize = 0;
-                    type->is_variable_struct = 1;
-                    type->variable_increment = mtype.pointers > 1 ? sizeof(void*) : mtype.base_size;
+                    } else if (mtype.is_bitfield) {
+                        msize = (mtype.align_mask + 1);
+#ifdef _WIN32
+                        /* MSVC has a bug where it doesn't update the alignment of
+                         * a union for bitfield members. */
+                        malign = pack_align = 0;
+#endif
 
-                } else if (mtype.is_variable_struct) {
-                    assert(!mtype.variable_size_known);
-                    msize = mtype.base_size;
-                    type->is_variable_struct = 1;
-                    type->variable_increment = mtype.variable_increment;
+                    } else if (mtype.is_array) {
+                        msize = mtype.array_size * (mtype.pointers > 1 ? sizeof(void*) : mtype.base_size);
 
-                } else if (mtype.is_array) {
-                    msize = mtype.array_size * (mtype.pointers ? sizeof(void*) : mtype.base_size);
+                    } else {
+                        msize = mtype.pointers ? sizeof(void*) : mtype.base_size;
+                    }
 
+                    type->base_size = max(type->base_size, msize);
+
+                } else if (mtype.is_bitfield) {
+                    size_t base_bits = (mtype.align_mask + 1) * CHAR_BIT;
+
+#ifdef _WIN32
+                    /* MSVC uses a separate storage unit for each size */
+                    if (bit_offset + bits_left != base_bits) {
+                        type->base_size += (bit_offset + bits_left) / CHAR_BIT;
+                        bits_left = bit_offset = 0;
+                    }
+#else
+                    /* GCC intermixes bitfields and normal members, so figure
+                     * out the number of bits left by finding how many bits
+                     * from the current offset to the next alignment boundary.
+                     */
+                    bits_left = (ALIGN_UP(type->base_size + 1, malign) - type->base_size) * CHAR_BIT - bit_offset;
+#endif
+
+                    if (mname && mtype.bit_size == 0) {
+                        luaL_error(L, "zero length bitfields must be unnamed on line %d", P->line);
+                    }
+
+                    if (0 < mtype.bit_size && mtype.bit_size <= bits_left) {
+                        /* use the current storage unit */
+                        mtype.offset = ALIGN_DOWN(type->base_size, pack_align);
+                        mtype.bit_offset = bit_offset + (type->base_size - mtype.offset) * CHAR_BIT;
+                        bit_offset += mtype.bit_size;
+                        bits_left -= mtype.bit_size;
+
+                    } else {
+#ifndef _WIN32
+                        /* GCC intermixes bitfields and normal members so just
+                         * round up to the next byte
+                         */
+                        bits_left = CHAR_BIT - 1;
+#endif
+                        /* finish up the current storage unit */
+                        type->base_size += (bit_offset + bits_left) / CHAR_BIT;
+                        bit_offset = bits_left = 0;
+
+                        if (mtype.bit_size) {
+                            /* start a new storage unit */
+                            type->base_size = ALIGN_UP(type->base_size, pack_align);
+                            mtype.offset = type->base_size;
+                            mtype.bit_offset = 0;
+                            bit_offset = mtype.bit_size;
+                            bits_left = base_bits - mtype.bit_size;
+#ifndef _WIN32
+                        } else {
+                            /* GCC uses :0 to force alignment to that type,
+                             * msvc uses it as an indicator to finish the
+                             * current storage unit (which we've already done)
+                             */
+                            type->base_size = ALIGN_UP(type->base_size, pack_align);
+#endif
+                        }
+                    }
+
+#ifdef _WIN32
+                    /* :0 bitfields don't update the struct alignment as they
+                     * are just finishing the current storage unit. */
+                    if (mtype.bit_size == 0) {
+                        malign = pack_align = 0;
+                    }
+#else
+                    /* unnamed bitfields don't update the struct alignment */
+                    if (!mname) {
+                        malign = pack_align = 0;
+                    }
+
+                    /* GCC intermixes bitfields and normal members so just
+                     * round up to the next byte
+                     */
+                    bits_left = CHAR_BIT - 1;
+#endif
+                    
                 } else {
-                    msize = mtype.pointers ? sizeof(void*) : mtype.base_size;
-                }
 
+                    /* finish up the current bitfield storage unit */
+                    type->base_size += (bit_offset + bits_left) / CHAR_BIT;
+                    bits_left = bit_offset = 0;
 
+                    mtype.offset = ALIGN_UP(type->base_size, pack_align);
 
-                /* P->align_mask specifies the max alignment due to the current pack setting */
-                if (malign > P->align_mask) {
-                    malign = P->align_mask;
+                    if (mtype.is_variable_array) {
+                        type->is_variable_struct = 1;
+                        type->variable_increment = mtype.pointers > 1 ? sizeof(void*) : mtype.base_size;
+
+                    } else if (mtype.is_variable_struct) {
+                        assert(!mtype.variable_size_known && !mtype.is_array && !mtype.pointers);
+                        type->base_size += mtype.base_size;
+                        type->is_variable_struct = 1;
+                        type->variable_increment = mtype.variable_increment;
+
+                    } else if (mtype.is_array) {
+                        type->base_size += mtype.array_size * (mtype.pointers > 1 ? sizeof(void*) : mtype.base_size);
+
+                    } else {
+                        type->base_size += mtype.pointers ? sizeof(void*) : mtype.base_size;
+                    }
                 }
 
                 /* increase the outer struct/union alignment if needed */
-                if (type->align_mask < malign) {
-                    type->align_mask = (unsigned int) malign;
+                if (pack_align > type->align_mask) {
+                    type->align_mask = pack_align;
                 }
 
-                /* increase the union size if needed */
-                if (type->type == UNION_TYPE && type->base_size < msize) {
-                    type->base_size = msize;
+                if (type->align_mask > P->align_mask) {
+                    type->align_mask = P->align_mask;
                 }
-
-                /* set the mbr offset and increase the struct size */
-                if (type->type == STRUCT_TYPE) {
-                    mtype.offset = ALIGN(type->base_size, malign);
-                    type->base_size = mtype.offset + msize;
-                }
-
 
                 if (mname) {
                     lua_pushlstring(L, mname, mnamesz);
                     push_ctype(L, -2, &mtype);
 
-                    if (type->type == STRUCT_TYPE) {
+                    if (type->type == STRUCT_TYPE || midx == 1) {
                         /* usrvalue[mbr index] = pushed mtype */
                         lua_pushvalue(L, -1);
                         lua_rawseti(L, ct_usr, midx++);
@@ -478,24 +583,30 @@ static void parse_record(lua_State* L, parser_t* P, ctype_t* type)
 
                 } else if (mtype.type == STRUCT_TYPE || mtype.type == UNION_TYPE) {
                     /* With an unnamed member we copy all of the submembers
-                     * into our usr value adjusting the offset as necessary */
-
-                    /* the numeric indexes are used for passing structs as
-                     * arguments, this is only possible when none of the
-                     * records are unions 
+                     * into our usr value adjusting the offset as necessary.
+                     * Note ctypes are immutable so need to push a new ctype
+                     * to update the offset.
                      */
-                    if (type->type == STRUCT_TYPE && mtype.type == STRUCT_TYPE) {
-                        size_t i, sublen = lua_rawlen(L, -1);
-                        for (i = 0; i < sublen; i++) {
-                            lua_rawgeti(L, -1, (int) i);
-                            lua_rawseti(L, ct_usr, midx++);
-                        }
+
+                    ctype_t ct;
+                    int i, sublen;
+
+                    /* integer keys */
+                    sublen = (int) lua_rawlen(L, -1);
+                    for (i = 0; i < sublen; i++) {
+                        lua_rawgeti(L, -1, i);
+
+                        ct = *(const ctype_t*) lua_touserdata(L, -1);
+                        ct.offset += mtype.offset;
+                        lua_getuservalue(L, -1);
+
+                        push_ctype(L, -1, &ct);
+                        lua_rawseti(L, ct_usr, midx++);
+
+                        lua_pop(L, 2); /* ctype, user value */
                     }
 
-                    /* copy over the values from the inner user value with a
-                     * string key including updating its offset note we need
-                     * to create a new ctype when updating the ctype as ctypes
-                     * are immutable */
+                    /* string keys */
                     lua_pushnil(L);
                     while (lua_next(L, -2)) {
                         if (lua_type(L, -2) == LUA_TSTRING) {
@@ -513,8 +624,8 @@ static void parse_record(lua_State* L, parser_t* P, ctype_t* type)
                         lua_pop(L, 1);
                     }
                 }
-                /* we ignore unnamed members that aren't structs or unions -
-                 * these are there to change the padding */
+                /* We ignore unnamed members that aren't structs or unions.
+                 * These are there just to change the padding */
 
                 /* pop the usr value from push_argument */
                 lua_pop(L, 1);
@@ -525,8 +636,6 @@ static void parse_record(lua_State* L, parser_t* P, ctype_t* type)
                     break;
                 } else if (tok.type != TOK_COMMA) {
                     luaL_error(L, "unexpected token in struct definition on line %d", P->line);
-                } else if (type->is_variable_struct) {
-                    luaL_error(L, "can't have members after a variable sized member on line %d", P->line);
                 }
             }
 
@@ -534,12 +643,15 @@ static void parse_record(lua_State* L, parser_t* P, ctype_t* type)
             lua_pop(L, 1);
         }
 
+        /* finish up the current bitfield storage unit */
+        type->base_size += (bit_offset + CHAR_BIT - 1) / CHAR_BIT;
+
         /* only void is allowed 0 size */
         if (type->base_size == 0) {
             type->base_size = 1;
         }
 
-        type->base_size = ALIGN(type->base_size, type->align_mask);
+        type->base_size = ALIGN_UP(type->base_size, type->align_mask);
     }
 
     assert(lua_gettop(L) == top + 1);
@@ -997,6 +1109,29 @@ static void parse_function_arguments(lua_State* L, parser_t* P, ctype_t* ftype, 
     assert(lua_istable(L, -1));
 }
 
+static int max_bitfield_size(int type)
+{
+    switch (type) {
+    case BOOL_TYPE:
+        return 1;
+    case INT8_TYPE:
+    case UINT8_TYPE:
+        return 8;
+    case INT16_TYPE:
+    case UINT16_TYPE:
+        return 16;
+    case INT32_TYPE:
+    case UINT32_TYPE:
+    case ENUM_TYPE:
+        return 32;
+    case INT64_TYPE:
+    case UINT64_TYPE:
+        return 64;
+    default:
+        return -1;
+    }
+}
+
 /* parses after the main base type of a typedef, function argument or
  * struct/union member
  * eg for const void* bar[3] the base type is void with the subtype so far of
@@ -1129,7 +1264,15 @@ const char* parse_argument(lua_State* L, parser_t* P, int ct_usr, ctype_t* type,
             break;
            
         } else if (tok.type == TOK_COLON) {
-            luaL_error(L, "NYI bitfields");
+            int64_t bsize = calculate_constant(L, P);
+
+            if (type->pointers || bsize < 0 || bsize > max_bitfield_size(type->type)) {
+                luaL_error(L, "invalid bitfield on line %d", P->line);
+            }
+
+            type->is_bitfield = 1;
+            type->bit_size = (unsigned int) bsize;
+            break;
            
         } else if (tok.type != TOK_TOKEN) {
             /* we've reached the end of the declaration */
@@ -1166,7 +1309,11 @@ const char* parse_argument(lua_State* L, parser_t* P, int ct_usr, ctype_t* type,
         }
     }
 
-    type->calling_convention = C_CALL;
+    if (type->calling_convention != C_CALL) {
+        /* functions use ftype and have already returned */
+        luaL_error(L, "calling convention annotation only allowed on functions and function pointers on line %d", P->line);
+    }
+
     lua_pushvalue(L, ct_usr);
     assert(lua_gettop(L) == top + 1 && (lua_istable(L, -1) || lua_isnil(L, -1)));
     return name;

@@ -86,7 +86,7 @@ static void* reserve_code(jit_t* jit, lua_State* L, size_t sz)
         jit->pages = (page_t*) realloc(jit->pages, (++jit->pagenum) * sizeof(page_t));
         page = &jit->pages[jit->pagenum-1];
 
-        page->size = ALIGN(sz + LINKTABLE_MAX_SIZE, jit->align_page_size);
+        page->size = ALIGN_UP(sz + LINKTABLE_MAX_SIZE, jit->align_page_size);
         page->off = 0;
         page->data = (uint8_t*) AllocPage(page->size);
 

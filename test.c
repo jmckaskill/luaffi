@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <inttypes.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 # define EXTERN_C extern "C"
@@ -48,7 +49,7 @@ PRINT(float, print_f, "g")
 PRINT(const char*, print_s, "s")
 PRINT(void*, print_p, "p")
 
-#define ALIGN(TYPE, SUFFIX, FORMAT) \
+#define ALIGN_UP(TYPE, SUFFIX, FORMAT) \
     struct align_##SUFFIX {         \
         char pad;                   \
         TYPE v;                     \
@@ -59,13 +60,13 @@ PRINT(void*, print_p, "p")
     }
 
 #define ALIGN2(A)                       \
-    ALIGN(uint16_t, A##_u16, PRIu16)    \
-    ALIGN(uint32_t, A##_u32, PRIu32)    \
-    ALIGN(uint64_t, A##_u64, PRIu64)    \
-    ALIGN(float, A##_f, "g")            \
-    ALIGN(double, A##_d, "g")           \
-    ALIGN(const char*, A##_s, "s")      \
-    ALIGN(void*, A##_p, "p")
+    ALIGN_UP(uint16_t, A##_u16, PRIu16)    \
+    ALIGN_UP(uint32_t, A##_u32, PRIu32)    \
+    ALIGN_UP(uint64_t, A##_u64, PRIu64)    \
+    ALIGN_UP(float, A##_f, "g")            \
+    ALIGN_UP(double, A##_d, "g")           \
+    ALIGN_UP(const char*, A##_s, "s")      \
+    ALIGN_UP(void*, A##_p, "p")
 
 ALIGN2(0)
 
@@ -82,7 +83,151 @@ ALIGN2(8)
 ALIGN2(16)
 #pragma pack(pop)
 
+#ifdef _MSC_VER
+#define alignof(type) __alignof(type)
+#else
+#define alignof(type) __alignof__(type)
+#endif
 
+/* bit_fields1.cpp */
+/* compile with: /LD */
+struct Date {
+   unsigned short nWeekDay  : 3;    /* 0..7   (3 bits) */
+   unsigned short nMonthDay : 6;    /* 0..31  (6 bits) */
+   unsigned short nMonth    : 5;    /* 0..12  (5 bits) */
+   unsigned short nYear     : 8;    /* 0..100 (8 bits) */
+};
 
+EXPORT int print_date(size_t* sz, size_t* align, char* buf, struct Date* d);
 
+int print_date(size_t* sz, size_t* align, char* buf, struct Date* d) {
+    *sz = sizeof(struct Date);
+    *align = alignof(struct Date);
+    return sprintf(buf, "%d %d %d %d", d->nWeekDay, d->nMonthDay, d->nMonth, d->nYear);
+}
+
+/* bit_fields2.cpp */
+/* compile with: /LD */
+struct Date2 {
+   unsigned nWeekDay  : 3;    /* 0..7   (3 bits) */
+   unsigned nMonthDay : 6;    /* 0..31  (6 bits) */
+   unsigned           : 0;    /* Force alignment to next boundary. */
+   unsigned nMonth    : 5;    /* 0..12  (5 bits) */
+   unsigned nYear     : 8;    /* 0..100 (8 bits) */
+};
+
+EXPORT int print_date2(size_t* sz, size_t* align, char* buf, struct Date2* d);
+
+int print_date2(size_t* sz, size_t* align, char* buf, struct Date2* d) {
+    *sz = sizeof(struct Date2);
+    *align = alignof(struct Date2);
+    return sprintf(buf, "%d %d %d %d", d->nWeekDay, d->nMonthDay, d->nMonth, d->nYear);
+}
+
+// Examples from SysV X86 ABI
+struct sysv1 {
+    int     j:5;
+    int     k:6;
+    int     m:7;
+};
+
+EXPORT int print_sysv1(size_t* sz, size_t* align, char* buf, struct sysv1* s);
+
+int print_sysv1(size_t* sz, size_t* align, char* buf, struct sysv1* s) {
+    *sz = sizeof(struct sysv1);
+    *align = alignof(struct sysv1);
+    return sprintf(buf, "%d %d %d", s->j, s->k, s->m);
+}
+
+struct sysv2 {
+    short   s:9;
+    int     j:9;
+    char    c;
+    short   t:9;
+    short   u:9;
+    char    d;
+};
+
+EXPORT int print_sysv2(size_t* sz, size_t* align, char* buf, struct sysv2* s);
+
+int print_sysv2(size_t* sz, size_t* align, char* buf, struct sysv2* s) {
+    *sz = sizeof(struct sysv2);
+    *align = alignof(struct sysv2);
+    return sprintf(buf, "%d %d %d %d %d %d", s->s, s->j, s->c, s->t, s->u, s->d);
+}
+
+struct sysv3 {
+    char    c;
+    short   s:8;
+};
+
+EXPORT int print_sysv3(size_t* sz, size_t* align, char* buf, struct sysv3* s);
+
+int print_sysv3(size_t* sz, size_t* align, char* buf, struct sysv3* s) {
+    *sz = sizeof(struct sysv3);
+    *align = alignof(struct sysv3);
+    return sprintf(buf, "%d %d", s->c, s->s);
+}
+
+union sysv4 {
+    char    c;
+    short   s:8;
+};
+
+EXPORT int print_sysv4(size_t* sz, size_t* align, char* buf, union sysv4* s);
+
+int print_sysv4(size_t* sz, size_t* align, char* buf, union sysv4* s) {
+    *sz = sizeof(union sysv4);
+    *align = alignof(union sysv4);
+    return sprintf(buf, "%d", s->s);
+}
+
+struct sysv5 {
+    char    c;
+    int     :0;
+    char    d;
+    short   :9;
+    char    e;
+    char    :0;
+};
+
+EXPORT int print_sysv5(size_t* sz, size_t* align, char* buf, struct sysv5* s);
+
+int print_sysv5(size_t* sz, size_t* align, char* buf, struct sysv5* s) {
+    *sz = sizeof(struct sysv5);
+    *align = alignof(struct sysv5);
+    return sprintf(buf, "%d %d %d", s->c, s->d, s->e);
+}
+
+struct sysv6 {
+    char    c;
+    int     :0;
+    char    d;
+    int     :9;
+    char    e;
+};
+
+EXPORT int print_sysv6(size_t* sz, size_t* align, char* buf, struct sysv6* s);
+
+int print_sysv6(size_t* sz, size_t* align, char* buf, struct sysv6* s) {
+    *sz = sizeof(struct sysv6);
+    *align = alignof(struct sysv6);
+    return sprintf(buf, "%d %d %d", s->c, s->d, s->e);
+}
+
+struct sysv7 {
+    int     j:9;
+    short   s:9;
+    char    c;
+    short   t:9;
+    short   u:9;
+};
+
+EXPORT int print_sysv7(size_t* sz, size_t* align, char* buf, struct sysv7* s);
+
+int print_sysv7(size_t* sz, size_t* align, char* buf, struct sysv7* s) {
+    *sz = sizeof(struct sysv7);
+    *align = alignof(struct sysv7);
+    return sprintf(buf, "%d %d %d %d %d", s->j, s->s, s->c, s->t, s->u);
+}
 

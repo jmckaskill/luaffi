@@ -123,7 +123,9 @@ struct jit_t {
     void* kernel32_dll;
 };
 
-#define ALIGN(PTR, MASK) \
+#define ALIGN_DOWN(PTR, MASK) \
+  (((uintptr_t) (PTR)) & (~ ((uintptr_t) (MASK)) ))
+#define ALIGN_UP(PTR, MASK) \
   (( ((uintptr_t) (PTR)) + ((uintptr_t) (MASK)) ) & (~ ((uintptr_t) (MASK)) ))
 
 
@@ -210,32 +212,43 @@ enum {
 #define IS_UNSIGNED(type) (type >= UINT8_TYPE)
 #define IS_CHAR(type) ((type) == INT8_TYPE || (type) == UINT8_TYPE)
 
-/* note: if adding a new member that is associated with a struct/union
- * definition then it needs to be copied over in ctype.c for when we create
- * types based off of the declaration alone */
+/* Note: if adding a new member that is associated with a struct/union
+ * definition then it needs to be copied over in ctype.c:set_defined for when
+ * we create types based off of the declaration alone.
+ *
+ * Since this is used as a header for every ctype and cdata, and we create a
+ * ton of them on the stack, we try and minimise its size.
+ */
 typedef struct ctype_t {
-    size_t base_size; /* size of the base type */
     union {
-        /* Valid if is_array and not is_variable_struct and not is_variable_array */
+        /* size of bitfield in bits - valid if is_bitfield */
+        size_t bit_size;
+        /* size of the base type in bytes - valid if !is_bitfield */
+        size_t base_size;
+    };
+    union {
+        /* Valid if is_array and !is_variable_struct and !is_variable_array */
         size_t array_size;
         /* Valid for is_variable_struct or is_variable_array. If
          * variable_size_known (only used for is_variable_struct) then this is
-         * the total increment otherwise this is the per element increment
+         * the total increment otherwise this is the per element increment.
          */
         size_t variable_increment;
     };
     size_t offset;
-    unsigned int align_mask : 4; /* as align bytes - 1 eg 7 gives 8 byte alignment */
-    unsigned int pointers : 4;
-    unsigned int type : 5;
-    unsigned int is_reference : 1;
-    unsigned int is_array : 1;
-    unsigned int calling_convention : 2;
-    unsigned int is_defined : 1;
-    unsigned int has_var_arg : 1;
-    unsigned int is_variable_struct : 1;
-    unsigned int is_variable_array : 1;
-    unsigned int variable_size_known : 1;
+    unsigned align_mask : 4; /* as align bytes - 1 eg 7 gives 8 byte alignment */
+    unsigned pointers : 4; /* number of dereferences to get to the base type including +1 for arrays */
+    unsigned type : 5; /* value given by type enum above */
+    unsigned is_reference : 1;
+    unsigned is_array : 1;
+    unsigned is_defined : 1;
+    unsigned calling_convention : 2;
+    unsigned has_var_arg : 1;
+    unsigned is_variable_array : 1; /* set for variable array types where we don't know the variable size yet */
+    unsigned is_variable_struct : 1;
+    unsigned variable_size_known : 1; /* used for variable structs after we know the variable size */
+    unsigned is_bitfield : 1;
+    unsigned bit_offset : 6; /* offset within the current byte between 0-63 */
 } ctype_t;
 
 typedef union cdata_t cdata_t;

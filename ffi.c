@@ -377,8 +377,10 @@ void* to_typed_pointer(lua_State* L, int idx, int to_usr, const ctype_t* tt)
 
     if (tt->pointers == 1 && (tt->type == STRUCT_TYPE || tt->type == UNION_TYPE) && lua_type(L, idx) == LUA_TTABLE) {
         /* need to construct a struct of the target type */
-        p = push_cdata(L, to_usr, tt);
-        set_struct(L, idx, p, to_usr, tt, 1);
+        ctype_t ct = *tt;
+        ct.pointers = ct.is_array = 0;
+        p = push_cdata(L, to_usr, &ct);
+        set_struct(L, idx, p, to_usr, &ct, 1);
         return p;
     }
    
@@ -652,6 +654,15 @@ static void set_value(lua_State* L, int idx, void* to, int to_usr, const ctype_t
 
         lua_pop(L, 1);
 
+    } else if (tt->is_bitfield) {
+
+        uint64_t hi_mask = UINT64_C(0) - (UINT64_C(1) << (tt->bit_offset + tt->bit_size));
+        uint64_t low_mask = (UINT64_C(1) << tt->bit_offset) - UINT64_C(1);
+        uint64_t val = to_uint64(L, idx);
+        val &= (UINT64_C(1) << tt->bit_size) - 1;
+        val <<= tt->bit_offset;
+        *(uint64_t*) to = val | (*(uint64_t*) to & (hi_mask | low_mask));
+
     } else {
 
         switch (tt->type) {
@@ -812,27 +823,22 @@ static int ffi_alignof(lua_State* L)
 
 static int ffi_offsetof(lua_State* L)
 {
-    ctype_t ct;
-    lua_settop(L, 2);
+    size_t off;
+    ctype_t ct, mbr;
+    setmintop(L, 2);
     check_ctype(L, 1, &ct);
 
-    if (ct.type != STRUCT_TYPE || ct.is_array || ct.pointers > 1) {
-        push_type_name(L, -1, &ct);
-        return luaL_error(L, "argument 1 has type %s and is not a struct", lua_tostring(L, -1));
-    }
-
-    /* get the member ctype */
     lua_pushvalue(L, 2);
-    lua_rawget(L, -2);
+    off = get_member(L, -2, &ct, &mbr);
+    lua_pushnumber(L, off);
 
-    if (lua_isuserdata(L, -1)) {
-        ctype_t* mbr = (ctype_t*) lua_touserdata(L, -1);
-        lua_pushnumber(L, mbr->offset);
+    if (!mbr.is_bitfield) {
         return 1;
-    } else {
-        push_type_name(L, -2, &ct);
-        return luaL_error(L, "member %s not found in %s", lua_tostring(L, 2), lua_tostring(L, -1));
     }
+
+    lua_pushnumber(L, mbr.bit_offset);
+    lua_pushnumber(L, mbr.bit_size);
+    return 3;
 }
 
 static int ffi_istype(lua_State* L)
@@ -958,6 +964,37 @@ static int cdata_index(lua_State* L)
         to = push_cdata(L, -1, &ct);
         *(void**) to = data;
         return 1;
+
+    } else if (ct.is_bitfield) {
+
+        if (ct.type == UINT64_TYPE || ct.type == INT64_TYPE) {
+            ctype_t rt;
+            uint64_t val = *(uint64_t*) data;
+            val <<= ct.bit_offset;
+            val &= (UINT64_C(2) << ct.bit_size) - 1;
+
+            memset(&rt, 0, sizeof(rt));
+            rt.base_size = 8;
+            rt.type = UINT64_TYPE;
+            rt.is_defined = 1;
+
+            to = push_cdata(L, -1, &rt);
+            *(uint64_t*) to = val;
+
+            return 1;
+
+        } else if (ct.type == BOOL_TYPE) {
+            uint8_t val = *(uint8_t*) data;
+            lua_pushboolean(L, val & (2 << ct.bit_offset));
+            return 1;
+
+        } else {
+            uint32_t val = *(uint32_t*) data;
+            val <<= ct.bit_offset;
+            val &= (2 << ct.bit_size) - 1;
+            lua_pushnumber(L, val);
+            return 1;
+        }
 
     } else if (ct.pointers) {
         to = push_cdata(L, -1, &ct);
