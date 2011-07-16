@@ -172,7 +172,7 @@ static void compile_extern_jump(jit_t* jit, lua_State* L, function_t func, uint8
      *
      * eg on 64 bit:
      * 0-8: function ptr
-     * 8-14: jmp aword [rip-6]
+     * 8-14: jmp aword [rip-14]
      * 
      * for 32 bit we only set the function ptr as it can always fit in a 32
      * bit displacement

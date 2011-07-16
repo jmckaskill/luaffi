@@ -161,6 +161,13 @@ static void commit_code(jit_t* jit, void* p, size_t sz)
     page_t* page = &jit->pages[jit->pagenum-1];
     page->off += sz;
     EnableExecute(page->data, page->size, 1);
+#if 0
+    {
+        FILE* out = fopen("out.bin", "wb");
+        fwrite(page->data, page->off, 1, out);
+        fclose(out);
+    }
+#endif
 }
 
 
