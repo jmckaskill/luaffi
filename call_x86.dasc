@@ -16,7 +16,7 @@
 |.if X64WIN
 |.macro call_piip, func, arg0, arg1, arg2, arg3
 | mov r9, arg3
-| mov r8, arg2
+| mov r8d, arg2
 | mov edx, arg1
 | mov rcx, arg0
 | call func
@@ -43,6 +43,15 @@
 |.endmacro
 |
 |.elif X64
+|.macro call_piiiip, func, arg0, arg1, arg2, arg3, arg4, arg5
+| mov r9, arg5
+| mov r8d, arg4
+| mov ecx, arg3
+| mov edx, arg2
+| mov esi, arg1
+| mov rdi, arg0
+| call func
+|.endmacro
 |.macro call_piiip, func, arg0, arg1, arg2, arg3, arg4
 | mov r8, arg4
 | mov ecx, arg3
@@ -205,14 +214,20 @@ void compile_globals(jit_t* jit, lua_State* L)
 
     |.if X64
     |.define L_ARG, r12
+    |.define TOP, r13d
+    |.define TOP_SAVE, r13
     |.else
     |.define L_ARG, rdi
+    |.define TOP, esi
+    |.define TOP_SAVE, rsi
     |.endif
 
     |.macro epilog
     |.if X64
+    | mov TOP_SAVE, [rbp-16]
     | mov L_ARG, [rbp-8]
     |.else
+    | mov TOP_SAVE, [rbp-8]
     | mov L_ARG, [rbp-4]
     |.endif
     | mov rsp, rbp
@@ -486,22 +501,24 @@ void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const 
     | push rbp
     | mov rbp, rsp
     | push L_ARG
-    | // stack is 4 or 8 (mod 16) (L_ARG, rbp, rip)
+    | push TOP_SAVE
+    | // stack is 0 (mod 16) (TOP, L_ARG, rbp, rip)
     |
     |.if X64WIN
     | mov L_ARG, rcx
-    | sub rsp, 40 // 8 bytes to realign, 32 bytes shadow space for lua_gettop
+    | sub rsp, 32 // 32 bytes shadow space for lua_gettop
     | // leave rcx as is for call to lua_gettop
     |.elif X64
     | mov L_ARG, rdi
-    | and rsp, ~15
     | // leave rdi as is for call to lua_gettop
     |.else
     | mov L_ARG, [rbp + 8]
-    | push L_ARG // also realigns stack
+    | sub rsp, 16
+    | mov [rsp], L_ARG
     |.endif
     |
     | call extern lua_gettop
+    | mov TOP, eax
     | cmp eax, nargs
     | jl ->too_few_arguments
 
@@ -621,14 +638,30 @@ void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const 
 #ifdef _WIN64
         |.if X64WIN
         if (reg.regs < MAX_REGISTERS) {
+            assert(reg.regs == nargs);
+            | cmp TOP, MAX_REGISTERS
+            | jle >1
+            | // unpack onto stack
+            | mov rax, rsp
+            | add rax, 32 + 8*MAX_REGISTERS
+            | call_piip, extern unpack_varargs_stack, L_ARG, MAX_REGISTERS+1, TOP, rax
+            | // unpack to registers
             | mov rax, rsp
             | add rax, 32 + 8*(reg.regs)
-            | call_piip, extern unpack_varargs_reg, L_ARG, nargs+1, MAX_REGISTERS - reg.regs, rax
+            | call_piip, extern unpack_varargs_reg, L_ARG, nargs+1, MAX_REGISTERS, rax
+            | jmp >2
+            |1:
+            | // unpack just to registers
+            | mov rax, rsp
+            | add rax, 32 + 8*(reg.regs)
+            | call_piip, extern unpack_varargs_reg, L_ARG, nargs+1, TOP, rax
+            |2:
+        } else {
+            | // unpack just to stack
+            | mov rax, rsp
+            | add rax, reg.off
+            | call_piip, extern unpack_varargs_stack, L_ARG, nargs+1, TOP, rax
         }
-
-        | mov rax, rsp
-        | add rax, 32 + 8*MAX_REGISTERS
-        | call_pip, extern unpack_varargs_stack, L_ARG, nargs + 1 + MAX_REGISTERS - reg.regs, rax
 
         for (i = nargs; i < MAX_REGISTERS; i++) {
             reg.is_int[i] = reg.is_float[i] = 1;
@@ -639,26 +672,27 @@ void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const 
         if (reg.floats < MAX_FLOAT_REGISTERS) {
             | mov rax, rsp
             | add rax, 32 + 8*(MAX_INT_REGISTERS + reg.floats)
-            | call_piip, extern unpack_varargs_float, L_ARG, nargs+1, MAX_FLOAT_REGISTERS - reg.floats, rax
+            | call_piiip, extern unpack_varargs_float, L_ARG, nargs+1, TOP, MAX_FLOAT_REGISTERS - reg.floats, rax
         }
 
         if (reg.ints < MAX_INT_REGISTERS) {
             | mov rax, rsp
             | add rax, 32 + 8*(reg.ints)
-            | call_piip, extern unpack_varargs_int, L_ARG, nargs+1, MAX_INT_REGISTERS - reg.ints, rax
+            | call_piiip, extern unpack_varargs_int, L_ARG, nargs+1, TOP, MAX_INT_REGISTERS - reg.ints, rax
         }
 
         | mov rax, rsp
         | add rax, reg.off
-        | call_piiip, extern unpack_varargs_stack_skip, L_ARG, nargs+1, MAX_INT_REGISTERS - reg.ints, MAX_FLOAT_REGISTERS - reg.floats, rax
-        |.endif
+        | call_piiiip, extern unpack_varargs_stack_skip, L_ARG, nargs+1, TOP, MAX_INT_REGISTERS - reg.ints, MAX_FLOAT_REGISTERS - reg.floats, rax
 
         reg.floats = MAX_FLOAT_REGISTERS;
         reg.ints = MAX_INT_REGISTERS;
 #else
+        |.else
         | mov rax, rsp
         | add rax, reg.off
-        | call_pip, extern unpack_varargs_stack, L_ARG, nargs+1, rax
+        | call_piip, extern unpack_varargs_stack, L_ARG, nargs+1, TOP, rax
+        |.endif
 #endif
     }
 

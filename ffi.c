@@ -179,20 +179,18 @@ err:
     return type_error(L, i, "vararg", 0, NULL);
 }
 
-void unpack_varargs_stack(lua_State* L, int first, char* to)
+void unpack_varargs_stack(lua_State* L, int first, int last, char* to)
 {
     int i;
-    int last = lua_gettop(L);
 
     for (i = first; i <= last; i++) {
         to += unpack_vararg(L, i, to);
     }
 }
 
-void unpack_varargs_stack_skip(lua_State* L, int first, int floats_to_skip, int ints_to_skip, char* to)
+void unpack_varargs_stack_skip(lua_State* L, int first, int last, int ints_to_skip, int floats_to_skip, char* to)
 {
     int i;
-    int last = lua_gettop(L);
 
     for (i = first; i <= last; i++) {
         int type = lua_type(L, i);
@@ -207,43 +205,39 @@ void unpack_varargs_stack_skip(lua_State* L, int first, int floats_to_skip, int 
     }
 }
 
-void unpack_varargs_float(lua_State* L, int first, int left, char* to)
+void unpack_varargs_float(lua_State* L, int first, int last, int max, char* to)
 {
     int i;
-    int last = lua_gettop(L);
 
-    for (i = first; i <= last && left > 0; i++) {
+    for (i = first; i <= last && max > 0; i++) {
         if (lua_type(L, i) == LUA_TNUMBER) {
             unpack_vararg(L, i, to);
             to += sizeof(double);
-            left--;
+            max--;
         }
     }
 }
 
-void unpack_varargs_int(lua_State* L, int first, int left, char* to)
+void unpack_varargs_int(lua_State* L, int first, int last, int max, char* to)
 {
     int i;
-    int last = lua_gettop(L);
 
-    for (i = first; i <= last && left > 0; i++) {
+    for (i = first; i <= last && max > 0; i++) {
         if (lua_type(L, i) != LUA_TNUMBER) {
             unpack_vararg(L, i, to);
             to += sizeof(void*);
-            left--;
+            max--;
         }
     }
 }
 
-void unpack_varargs_reg(lua_State* L, int first, int left, char* to)
+void unpack_varargs_reg(lua_State* L, int first, int last, char* to)
 {
     int i;
-    int last = lua_gettop(L);
 
-    for (i = first; i <= last && left > 0; i++) {
+    for (i = first; i <= last; i++) {
         unpack_vararg(L, i, to);
         to += sizeof(double);
-        left--;
     }
 }
 
@@ -371,10 +365,24 @@ static int is_same_type(lua_State* L, int usr1, int usr2, const ctype_t* t1, con
         && (t1->type < UNION_TYPE || lua_rawequal(L, usr1, usr2));
 }
 
+static void set_struct(lua_State* L, int idx, void* to, int to_usr, const ctype_t* tt, int check_pointers);
+
 void* to_typed_pointer(lua_State* L, int idx, int to_usr, const ctype_t* tt)
 {
     ctype_t ft;
-    void* p = to_pointer(L, idx, &ft);
+    void* p;
+
+    to_usr = lua_absindex(L, to_usr);
+    idx = lua_absindex(L, idx);
+
+    if (tt->pointers == 1 && (tt->type == STRUCT_TYPE || tt->type == UNION_TYPE) && lua_type(L, idx) == LUA_TTABLE) {
+        /* need to construct a struct of the target type */
+        p = push_cdata(L, to_usr, tt);
+        set_struct(L, idx, p, to_usr, tt, 1);
+        return p;
+    }
+   
+    p = to_pointer(L, idx, &ft);
 
     if (is_void_ptr(tt)) {
         /* any pointer can convert to void* */
@@ -397,7 +405,6 @@ void* to_typed_pointer(lua_State* L, int idx, int to_usr, const ctype_t* tt)
     }
 
 suc:
-    lua_pop(L, 1);
     return p;
 
 err:
@@ -610,9 +617,9 @@ static void set_struct(lua_State* L, int idx, void* to, int to_usr, const ctype_
         } else {
             ctype_t ct;
             p = to_pointer(L, idx, &ct);
-            lua_pop(L, 1);
         }
         memcpy(to, p, tt->base_size);
+        lua_pop(L, 1);
         break;
 
     default:
@@ -632,13 +639,18 @@ static void set_value(lua_State* L, int idx, void* to, int to_usr, const ctype_t
 
     } else if (tt->pointers) {
 
+        if (lua_istable(L, idx)) {
+            luaL_error(L, "Can't set a pointer member to a struct that's about to be freed");
+        }
+
         if (check_pointers) {
             *(void**) to = to_typed_pointer(L, idx, to_usr, tt);
         } else {
             ctype_t ct;
             *(void**) to = to_pointer(L, idx, &ct);
-            lua_pop(L, 1);
         }
+
+        lua_pop(L, 1);
 
     } else {
 

@@ -281,13 +281,16 @@ int32_t to_int32(lua_State* L, int idx);
 uint32_t to_uint32(lua_State* L, int idx);
 uintptr_t to_uintptr(lua_State* L, int idx);
 int32_t to_enum(lua_State* L, int idx, int to_usr, const ctype_t* tt);
+/* this will always push a value for temp storage for structs created on the fly */
 void* to_typed_pointer(lua_State* L, int idx, int to_usr, const ctype_t* tt);
 function_t to_typed_function(lua_State* L, int idx, int to_usr, const ctype_t* tt);
-void unpack_varargs_stack(lua_State* L, int first, char* to);
-void unpack_varargs_stack_skip(lua_State* L, int first, int floats_to_skip, int ints_to_skip, char* to);
-void unpack_varargs_float(lua_State* L, int first, int left, char* to);
-void unpack_varargs_int(lua_State* L, int first, int left, char* to);
-void unpack_varargs_reg(lua_State* L, int first, int left, char* to);
+
+void unpack_varargs_stack(lua_State* L, int first, int last, char* to);
+void unpack_varargs_reg(lua_State* L, int first, int last, char* to);
+
+void unpack_varargs_stack_skip(lua_State* L, int first, int last, int ints_to_skip, int floats_to_skip, char* to);
+void unpack_varargs_float(lua_State* L, int first, int last, int max, char* to);
+void unpack_varargs_int(lua_State* L, int first, int last, int max, char* to);
 
 
 
