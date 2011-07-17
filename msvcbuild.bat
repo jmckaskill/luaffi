@@ -33,12 +33,16 @@ if exist ffi.dll.manifest^
 
 %DO_CL% /Gd test.c /Fo"test_cdecl.obj"
 %DO_CL% /Gz test.c /Fo"test_stdcall.obj"
+%DO_CL% /Gr test.c /Fo"test_fastcall.obj"
 %DO_LINK% /DLL /OUT:test_cdecl.dll test_cdecl.obj
 %DO_LINK% /DLL /OUT:test_stdcall.dll test_stdcall.obj
+%DO_LINK% /DLL /OUT:test_fastcall.dll test_fastcall.obj
 if exist test_cdecl.dll.manifest^
     %DO_MT% -manifest test_cdecl.dll.manifest -outputresource:"test_cdecl.dll;2"
 if exist test_stdcall.dll.manifest^
     %DO_MT% -manifest test_stdcall.dll.manifest -outputresource:"test_stdcall.dll;2"
+if exist test_fastcall.dll.manifest^
+    %DO_MT% -manifest test_fastcall.dll.manifest -outputresource:"test_fastcall.dll;2"
 
 @if "%1"=="test" %LUA_EXE% test.lua
 @if "%1"=="test-release" %LUA_EXE% test.lua

@@ -1194,10 +1194,14 @@ const char* parse_argument(lua_State* L, parser_t* P, int ct_usr, ctype_t* type,
                         type->calling_convention = C_CALL;
 
                     } else if (IS_LITERAL(tok, "__stdcall")) {
+#if defined __i386__ || defined _M_IX86
                         type->calling_convention = STD_CALL;
+#endif
 
                     } else if (IS_LITERAL(tok, "__fastcall")) {
+#if defined __i386__ || defined _M_IX86
                         type->calling_convention = FAST_CALL;
+#endif
 
                     } else if (IS_LITERAL(tok, "const") || IS_LITERAL(tok, "volatile")) {
                         /* ignored for now */
@@ -1283,10 +1287,14 @@ const char* parse_argument(lua_State* L, parser_t* P, int ct_usr, ctype_t* type,
             type->calling_convention = C_CALL;
 
         } else if (IS_LITERAL(tok, "__stdcall")) {
+#if defined __i386__ || defined _M_IX86
             type->calling_convention = STD_CALL;
+#endif
 
         } else if (IS_LITERAL(tok, "__fastcall")) {
+#if defined __i386__ || defined _M_IX86
             type->calling_convention = FAST_CALL;
+#endif
 
         } else if (IS_LITERAL(tok, "const") || IS_LITERAL(tok, "volatile")) {
             /* ignored for now */

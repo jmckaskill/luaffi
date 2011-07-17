@@ -1477,13 +1477,11 @@ static int ffi_load(lua_State* L)
     const char* libname = luaL_checkstring(L, 1);
     void** lib = (void**) lua_newuserdata(L, sizeof(void*));
 
-    fprintf(stderr, "%s\n", libname);
     *lib = LoadLibraryA(libname);
 
 #ifdef LIB_FORMAT_1
     if (!*lib) {
         libname = lua_pushfstring(L, LIB_FORMAT_1, lua_tostring(L, 1));
-    fprintf(stderr, "%s\n", libname);
         *lib = LoadLibraryA(libname);
         lua_pop(L, 1);
     }
@@ -1492,7 +1490,6 @@ static int ffi_load(lua_State* L)
 #ifdef LIB_FORMAT_2
     if (!*lib) {
         libname = lua_pushfstring(L, LIB_FORMAT_2, lua_tostring(L, 1));
-    fprintf(stderr, "%s\n", libname);
         *lib = LoadLibraryA(libname);
         lua_pop(L, 1);
     }
@@ -1573,11 +1570,21 @@ static int cmodule_index(lua_State* L)
         return 1;
     }
 
+#if defined _WIN32 && !defined _WIN64
     ct.calling_convention = STD_CALL;
     lua_pushfstring(L, "_%s@%d", funcname, x86_stack_required(L, -1));
     if (find_function(L, 1, -1, -2, &ct)) {
         return 1;
     }
+    lua_pop(L, 1);
+
+    ct.calling_convention = FAST_CALL;
+    lua_pushfstring(L, "@%s@%d", funcname, x86_stack_required(L, -1));
+    if (find_function(L, 1, -1, -2, &ct)) {
+        return 1;
+    }
+    lua_pop(L, 1);
+#endif
 
     return luaL_error(L, "failed to find function %s", funcname);
 }

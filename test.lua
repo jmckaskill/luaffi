@@ -4,6 +4,7 @@ local dlls = {ffi.load('test_cdecl')}
 
 if ffi.arch == 'x86' and ffi.os == 'Windows' then
     dlls[2] = ffi.load('test_stdcall')
+    dlls[3] = ffi.load('test_fastcall')
 end
 
 print('Running test')
