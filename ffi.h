@@ -242,6 +242,7 @@ typedef struct ctype_t {
     unsigned is_reference : 1;
     unsigned is_array : 1;
     unsigned is_defined : 1;
+    unsigned is_null : 1;
     unsigned calling_convention : 2;
     unsigned has_var_arg : 1;
     unsigned is_variable_array : 1; /* set for variable array types where we don't know the variable size yet */

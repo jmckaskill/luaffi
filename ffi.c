@@ -284,6 +284,7 @@ static void* to_pointer(lua_State* L, int idx, ctype_t* ct)
     switch (lua_type(L, idx)) {
     case LUA_TNIL:
         ct->type = VOID_TYPE;
+        ct->is_null = 1;
         lua_pushnil(L);
         return NULL;
 
@@ -327,6 +328,7 @@ static function_t to_function(lua_State* L, int idx, ctype_t* ct)
     switch (lua_type(L, idx)) {
     case LUA_TNIL:
         ct->type = VOID_TYPE;
+        ct->is_null = 1;
         lua_pushnil(L);
         return NULL;
 
@@ -390,7 +392,7 @@ void* to_typed_pointer(lua_State* L, int idx, int to_usr, const ctype_t* tt)
         /* any pointer can convert to void* */
         goto suc;
 
-    } else if (is_void_ptr(&ft) && p == NULL) {
+    } else if (ft.is_null) {
         /* NULL can convert to any pointer */
         goto suc;
     }
@@ -419,7 +421,7 @@ function_t to_typed_function(lua_State* L, int idx, int to_usr, const ctype_t* t
     ctype_t ft;
     function_t f = to_function(L, idx, &ft);
 
-    if (is_void_ptr(&ft) && f == NULL) {
+    if (ft.is_null) {
         /* NULL can convert to any function */
     } else if (!tt->type != ft.type || tt->calling_convention != ft.calling_convention || !lua_rawequal(L, to_usr, -1)) {
         goto err;
@@ -1782,7 +1784,9 @@ static int setup_upvals(lua_State* L)
         push_builtin(L, &ct, "void", VOID_TYPE, 0, 0);
 
         ct.pointers = 1;
-        push_cdata(L, 0, &ct);
+        ct.is_null = 1;
+        lua_pushnil(L);
+        push_cdata(L, -1, &ct);
         lua_setfield(L, CONSTANTS_UPVAL, "NULL");
 
 #define ALIGNOF(S) ((char*) &S.v - (char*) &S - 1)
