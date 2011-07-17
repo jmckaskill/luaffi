@@ -100,7 +100,7 @@ typedef struct {
     int line;
     const char* next;
     const char* prev;
-    size_t align_mask;
+    int align_mask;
 } parser_t;
 
 typedef struct {
@@ -222,7 +222,7 @@ enum {
 typedef struct ctype_t {
     union {
         /* size of bitfield in bits - valid if is_bitfield */
-        size_t bit_size;
+        int bit_size;
         /* size of the base type in bytes - valid if !is_bitfield */
         size_t base_size;
     };
@@ -275,7 +275,7 @@ void* to_cdata(lua_State* L, int idx, ctype_t* ct);
 void* check_cdata(lua_State* L, int idx, ctype_t* ct);
 size_t ctype_size(lua_State* L, const ctype_t* ct);
 
-void parse_type(lua_State* L, parser_t* P, ctype_t* type);
+int parse_type(lua_State* L, parser_t* P, ctype_t* type);
 const char* parse_argument(lua_State* L, parser_t* P, int ct_usr, ctype_t* type, size_t* namesz);
 void push_type_name(lua_State* L, int usr, const ctype_t* ct);
 
