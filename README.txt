@@ -18,11 +18,12 @@ Platforms
 ---------
 Currently supported:
 - windows x86
+- windows x64
 - linux x86
 - linux x64
 
-OSX and windows x64 support are almost done, but I currently have no way of
-building and/or testing them.
+OSX support is almost done, but I currently have no way of building and/or
+testing it;
 
 Currently only dll builds are supported (ie no static).
 
@@ -39,7 +40,7 @@ On windows use msvcbuild.bat in a visual studio cmd prompt. Available targets ar
 - clean: cleanup object files
 
 Edit msvcbuild.bat if your lua exe, lib, lua include path, or lua dll name
-differ from Lua 5.1 for windows.
+differ from c:\Lua5.1 and lua5.1.dll.
 
 On posix use make. Available targets are:
 - nothing or all: default release build
@@ -65,17 +66,17 @@ Known Issues
 - Not all metamethods work with lua 5.1 (eg char* + number). This is due to
   the way metamethods are looked up with mixed types in Lua 5.1. If you need
 this upgrade to Lua 5.2 or use boxed numbers (uint64_t and uintptr_t).
+- All bitfields are treated as unsigned (does anyone even use signed
+  bitfields?). Note that "int s:8" is unsigned on unix x86/x64, but signed on
+windows.
 
 Todo
 ----
-- Bitfields
-- Fastcall
-- Variable sized arrays and structs using [?]
 - Lua function callbacks
 - static const int
 - C++ classes (excluding inline c++ functions)
 - All the various gcc and msvc attributes
-- Finish and test windows X64 and OSX support
+- Finish and test OSX support
 - ffi.metatable
 
 How it works
