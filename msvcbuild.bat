@@ -23,9 +23,9 @@
 @set DO_MT=mt.exe /nologo
 
 :COMPILE
-%LUA_EXE% dynasm\dynasm.lua -D X32WIN -LN -o call_x86.h call_x86.dasc
-%LUA_EXE% dynasm\dynasm.lua -D X64 -LN -o call_x64.h call_x86.dasc
-%LUA_EXE% dynasm\dynasm.lua -D X64 -D X64WIN -LN -o call_x64win.h call_x86.dasc
+%LUA_EXE% dynasm\dynasm.lua -LNE -D X32WIN -o call_x86.h call_x86.dasc
+%LUA_EXE% dynasm\dynasm.lua -LNE -D X64 -o call_x64.h call_x86.dasc
+%LUA_EXE% dynasm\dynasm.lua -LNE -D X64 -D X64WIN -o call_x64win.h call_x86.dasc
 %DO_CL% /I"." /I"%LUA_INCLUDE%" /DLUA_DLL_NAME="%LUA_DLL%" call.c ctype.c ffi.c parser.c
 %DO_LINK% /DLL /OUT:ffi.dll "%LUA_LIB%" *.obj
 if exist ffi.dll.manifest^

@@ -80,11 +80,8 @@ static void luaL_setfuncs (lua_State *L, const luaL_Reg *l, int nup) {
 #define LIB_FORMAT_1 "%s.dll"
 #define AllocPage(size) VirtualAlloc(NULL, size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE)
 #define FreePage(data, size) VirtualFree(data, 0, MEM_RELEASE)
-static void EnableExecute(void* data, size_t size, int enabled)
-{
-    DWORD oldprotect;
-    VirtualProtect(data, size, enabled ? PAGE_EXECUTE : PAGE_READWRITE, &oldprotect);
-}
+#define EnableExecute(data, size) do {DWORD old; VirtualProtect(data, size, PAGE_EXECUTE, &old);} while (0)
+#define EnableWrite(data, size) do {DWORD old; VirtualProtect(data, size, PAGE_READWRITE, &old);} while (0)
 #else
 #define LIB_FORMAT_1 "%s.so"
 #define LIB_FORMAT_2 "lib%s.so"
@@ -92,9 +89,9 @@ static void EnableExecute(void* data, size_t size, int enabled)
 #define GetProcAddress(lib, name) dlsym(lib, name)
 #define AllocPage(size) mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0)
 #define FreePage(data, size) munmap(data, size)
-#define EnableExecute(data, size, enabled) mprotect(data, size, enabled ? PROT_READ|PROT_EXEC : PROT_READ|PROT_WRITE)
+#define EnableExecute(data, size) mprotect(data, size, PROT_READ|PROT_EXEC)
+#define EnableWrite(data, size) mprotect(data, size, PROT_READ|PROT_WRITE)
 #endif
-
 
 typedef struct {
     int line;
@@ -104,9 +101,9 @@ typedef struct {
 } parser_t;
 
 typedef struct {
-    uint8_t* data;
     size_t size;
     size_t off;
+    size_t freed;
 } page_t;
 
 struct jit_t {
@@ -114,11 +111,10 @@ struct jit_t {
     int32_t last_errno;
     dasm_State* ctx;
     size_t pagenum;
-    page_t* pages;
+    page_t** pages;
     size_t align_page_size;
     void** globals;
     int function_extern;
-    int errno_extern;
     void* lua_dll;
     void* kernel32_dll;
 };
@@ -137,19 +133,16 @@ struct ptr_align {char ch; void* v;};
 #define DEFAULT_ALIGN_MASK 7
 
 /* this needs to match the order of upvalues in luaopen_ffi
- * warning: CDATA_MT is the only upvalue copied across to the function pointer
- * closures (see call_*.dasc) so that to_cdata works
+ * warning these are not copied across to function pointer closures
  */
 enum {
     CTYPE_MT_IDX = 2,
-    CDATA_MT_IDX,
     CMODULE_MT_IDX,
     CONSTANTS_IDX,
     WEAK_KEY_MT_IDX,
     TYPE_IDX,
     FUNCTION_IDX,
     ABI_PARAM_IDX,
-    JIT_IDX,
     GC_IDX,
     TO_NUMBER_IDX,
     LAST_IDX,
@@ -158,14 +151,12 @@ enum {
 #define UPVAL_NUM (LAST_IDX - 2)
 
 #define CTYPE_MT_UPVAL lua_upvalueindex(CTYPE_MT_IDX - 1)
-#define CDATA_MT_UPVAL lua_upvalueindex(CDATA_MT_IDX - 1)
 #define CMODULE_MT_UPVAL lua_upvalueindex(CMODULE_MT_IDX - 1)
 #define CONSTANTS_UPVAL lua_upvalueindex(CONSTANTS_IDX - 1)
 #define WEAK_KEY_MT_UPVAL lua_upvalueindex(WEAK_KEY_MT_IDX - 1)
 #define TYPE_UPVAL lua_upvalueindex(TYPE_IDX - 1)
 #define FUNCTION_UPVAL lua_upvalueindex(FUNCTION_IDX - 1)
 #define ABI_PARAM_UPVAL lua_upvalueindex(ABI_PARAM_IDX - 1)
-#define JIT_UPVAL lua_upvalueindex(JIT_IDX - 1)
 #define GC_UPVAL lua_upvalueindex(GC_IDX - 1)
 #define TO_NUMBER_UPVAL lua_upvalueindex(TO_NUMBER_IDX - 1)
 
@@ -203,7 +194,6 @@ enum {
     UINT64_TYPE,
     UINTPTR_TYPE,
     ENUM_TYPE,
-    /* fancy types from here */
     UNION_TYPE,
     STRUCT_TYPE,
     FUNCTION_TYPE,
@@ -243,6 +233,7 @@ typedef struct ctype_t {
     unsigned is_array : 1;
     unsigned is_defined : 1;
     unsigned is_null : 1;
+    unsigned is_jitted : 1;
     unsigned calling_convention : 2;
     unsigned has_var_arg : 1;
     unsigned is_variable_array : 1; /* set for variable array types where we don't know the variable size yet */
@@ -268,9 +259,10 @@ union cdata_t {
 
 typedef void (*function_t)(void);
 
+void set_cdata_mt(lua_State* L);
 void set_defined(lua_State* L, int ct_usr, ctype_t* ct);
 void push_ctype(lua_State* L, int ct_usr, const ctype_t* ct);
-void* push_cdata(lua_State* L, int ct_usr, const ctype_t* ct);
+void* push_cdata(lua_State* L, int ct_usr, const ctype_t* ct); /* called from asm */
 void check_ctype(lua_State* L, int idx, ctype_t* ct);
 void* to_cdata(lua_State* L, int idx, ctype_t* ct);
 void* check_cdata(lua_State* L, int idx, ctype_t* ct);
@@ -282,8 +274,10 @@ void push_type_name(lua_State* L, int usr, const ctype_t* ct);
 
 int ffi_cdef(lua_State* L);
 
+void free_code(jit_t* jit, lua_State* L, function_t func);
 int x86_stack_required(lua_State* L, int usr);
 void push_function(jit_t* jit, lua_State* L, function_t f, int ct_usr, const ctype_t* ct);
+function_t push_callback(jit_t* jit, lua_State* L, int fidx, int ct_usr, const ctype_t* ct);
 void compile_globals(jit_t* jit, lua_State* L);
 int get_extern(jit_t* jit, uint8_t* addr, int idx, int type);
 
@@ -295,7 +289,7 @@ int32_t to_int32(lua_State* L, int idx);
 uint32_t to_uint32(lua_State* L, int idx);
 uintptr_t to_uintptr(lua_State* L, int idx);
 int32_t to_enum(lua_State* L, int idx, int to_usr, const ctype_t* tt);
-/* this will always push a value for temp storage for structs created on the fly */
+/* these two will always push a value so that we can create structs/functions on the fly */
 void* to_typed_pointer(lua_State* L, int idx, int to_usr, const ctype_t* tt);
 function_t to_typed_function(lua_State* L, int idx, int to_usr, const ctype_t* tt);
 

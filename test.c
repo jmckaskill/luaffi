@@ -231,3 +231,28 @@ int print_sysv7(size_t* sz, size_t* align, char* buf, struct sysv7* s) {
     return sprintf(buf, "%d %d %d %d %d", s->j, s->s, s->c, s->t, s->u);
 }
 
+#define CALL(TYPE, SUFFIX) \
+    EXPORT TYPE call_##SUFFIX(TYPE (*func)(TYPE), TYPE arg); \
+    EXPORT TYPE call_##SUFFIX(TYPE (*func)(TYPE), TYPE arg) { \
+        return func(arg); \
+    }
+
+CALL(int, i)
+CALL(float, f)
+CALL(double, d)
+CALL(const char*, s)
+
+struct fptr {
+#ifdef _MSC_VER
+    int (__cdecl *p)(int);
+#else
+    int (*p)(int);
+#endif
+};
+
+EXPORT int call_fptr(struct fptr* s, int val);
+
+int call_fptr(struct fptr* s, int val) {
+    return (s->p)(val);
+}
+

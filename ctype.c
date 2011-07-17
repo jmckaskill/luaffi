@@ -1,6 +1,15 @@
 #include "ffi.h"
 
 static int to_define_key;
+static int g_cdata_mt_key;
+
+void set_cdata_mt(lua_State* L)
+{
+    lua_pushlightuserdata(L, &g_cdata_mt_key);
+    lua_pushvalue(L, -2);
+    lua_rawset(L, LUA_REGISTRYINDEX);
+    lua_pop(L, 1);
+}
 
 static void update_on_definition(lua_State* L, int ct_usr, int ct_idx)
 {
@@ -73,7 +82,7 @@ void push_ctype(lua_State* L, int ct_usr, const ctype_t* ct)
     lua_pushvalue(L, CTYPE_MT_UPVAL);
     lua_setmetatable(L, -2);
 
-    if (ct->type >= ENUM_TYPE) {
+    if (!lua_isnil(L, ct_usr)) {
         lua_pushvalue(L, ct_usr);
         lua_setuservalue(L, -2);
     }
@@ -113,12 +122,13 @@ void* push_cdata(lua_State* L, int ct_usr, const ctype_t* ct)
     *(ctype_t*) &cd->type = *ct;
     memset(cd+1, 0, sz);
 
-    if (ct->type >= ENUM_TYPE) {
+    if (!lua_isnil(L, ct_usr)) {
         lua_pushvalue(L, ct_usr);
         lua_setuservalue(L, -2);
     }
 
-    lua_pushvalue(L, CDATA_MT_UPVAL);
+    lua_pushlightuserdata(L, &g_cdata_mt_key);
+    lua_rawget(L, LUA_REGISTRYINDEX);
     lua_setmetatable(L, -2);
 
     if (!ct->is_defined) {
@@ -142,8 +152,15 @@ void check_ctype(lua_State* L, int idx, ctype_t* ct)
         return;
 
     } else if (lua_getmetatable(L, idx)) {
-        if (!lua_rawequal(L, -1, CTYPE_MT_UPVAL) && !lua_rawequal(L, -1, CDATA_MT_UPVAL)) {
-            goto err;
+        if (!lua_rawequal(L, -1, CTYPE_MT_UPVAL)) {
+            lua_pushlightuserdata(L, &g_cdata_mt_key);
+            lua_rawget(L, LUA_REGISTRYINDEX);
+
+            if (!lua_rawequal(L, -2, -1)) {
+                goto err;
+            }
+
+            lua_pop(L, 1);
         }
 
         lua_pop(L, 1); /* pop the metatable */
@@ -153,11 +170,19 @@ void check_ctype(lua_State* L, int idx, ctype_t* ct)
 
     } else if (lua_iscfunction(L, idx)) {
         /* cdata functions have a cdata as the first upvalue */
-        if (!lua_getupvalue(L, idx, 1) || !lua_getmetatable(L, -1) || !lua_rawequal(L, -1, CDATA_MT_UPVAL)) {
+        if (!lua_getupvalue(L, idx, 1) || !lua_getmetatable(L, -1)) {
             goto err;
         }
 
-        lua_pop(L, 1); /* pop the metatable */
+        lua_pushlightuserdata(L, &g_cdata_mt_key);
+        lua_rawget(L, LUA_REGISTRYINDEX);
+
+        if (!lua_rawequal(L, -1, -2)) {
+            goto err;
+        }
+
+        lua_pop(L, 2); /* pop the metatables */
+
         *ct = *(ctype_t*) lua_touserdata(L, -1);
         lua_getuservalue(L, -1);
         lua_remove(L, -2); /* pop the ctype */
@@ -176,12 +201,15 @@ void* to_cdata(lua_State* L, int idx, ctype_t* ct)
     cdata_t* cd;
 
     if (lua_getmetatable(L, idx)) {
-        if (!lua_rawequal(L, -1, CDATA_MT_UPVAL)) {
-            lua_pop(L, 1);
-            return 0;
+        lua_pushlightuserdata(L, &g_cdata_mt_key);
+        lua_rawget(L, LUA_REGISTRYINDEX);
+
+        if (!lua_rawequal(L, -1, -2)) {
+            lua_pop(L, 2);
+            return NULL;
         }
 
-        lua_pop(L, 1);
+        lua_pop(L, 2); /* pop the metatables */
         cd = (cdata_t*) lua_touserdata(L, idx);
         lua_getuservalue(L, idx);
 
@@ -189,13 +217,18 @@ void* to_cdata(lua_State* L, int idx, ctype_t* ct)
         /* cdata functions have the cdata function pointer as the first upvalue */
         if (!lua_getmetatable(L, -1)) {
             lua_pop(L, 1);
-            return 0;
-        } else if (!lua_rawequal(L, -1, CDATA_MT_UPVAL)) {
-            lua_pop(L, 2);
-            return 0;
+            return NULL;
         }
 
-        lua_pop(L, 1);
+        lua_pushlightuserdata(L, &g_cdata_mt_key);
+        lua_rawget(L, LUA_REGISTRYINDEX);
+
+        if (!lua_rawequal(L, -1, -2)) {
+            lua_pop(L, 3);
+            return NULL;
+        }
+
+        lua_pop(L, 3);
         cd = (cdata_t*) lua_touserdata(L, -1);
         lua_getuservalue(L, -1);
         lua_remove(L, -2); /* remove the cdata user data */

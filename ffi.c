@@ -3,6 +3,10 @@
 #include <math.h>
 #include <inttypes.h>
 
+static int g_gc_index;
+
+static jit_t* get_jit(lua_State* L);
+
 static int type_error(lua_State* L, int idx, const char* to_type, int to_usr, const ctype_t* to_ct)
 {
     luaL_Buffer B;
@@ -320,41 +324,6 @@ static void* to_pointer(lua_State* L, int idx, ctype_t* ct)
     return NULL;
 }
 
-static function_t to_function(lua_State* L, int idx, ctype_t* ct)
-{
-    void* p;
-    memset(ct, 0, sizeof(*ct));
-
-    switch (lua_type(L, idx)) {
-    case LUA_TNIL:
-        ct->type = VOID_TYPE;
-        ct->is_null = 1;
-        lua_pushnil(L);
-        return NULL;
-
-    case LUA_TLIGHTUSERDATA:
-        ct->type = VOID_TYPE;
-        lua_pushnil(L);
-        return lua_touserdata(L, idx);
-
-    case LUA_TUSERDATA:
-        p = to_cdata(L, idx, ct);
-
-        if (!p) {
-            goto err;
-        } else if (ct->pointers) {
-            return p;
-        } else if (ct->type == UINTPTR_TYPE) {
-            return *(void**) p;
-        }
-        break;
-    }
-
-err:
-    type_error(L, idx, "function", 0, NULL);
-    return NULL;
-}
-
 static int is_void_ptr(const ctype_t* ct)
 {
     return ct->type == VOID_TYPE
@@ -416,25 +385,86 @@ err:
     return NULL;
 }
 
-function_t to_typed_function(lua_State* L, int idx, int to_usr, const ctype_t* tt)
+static function_t to_function(lua_State* L, int idx, int to_usr, const ctype_t* tt, int check_pointers)
 {
+    void* p;
     ctype_t ft;
-    function_t f = to_function(L, idx, &ft);
+    function_t f;
 
-    if (ft.is_null) {
-        /* NULL can convert to any function */
-    } else if (!tt->type != ft.type || tt->calling_convention != ft.calling_convention || !lua_rawequal(L, to_usr, -1)) {
+    idx = lua_absindex(L, idx);
+    to_usr = lua_absindex(L, to_usr);
+
+    switch (lua_type(L, idx)) {
+    case LUA_TFUNCTION:
+        f = push_callback(get_jit(L), L, idx, to_usr, tt);
+        /* add a weak reference from the lua function to the cdata so that the
+         * cdata is alive whilst the lua function is
+         */
+        lua_pushlightuserdata(L, &g_gc_index);
+        lua_rawget(L, LUA_REGISTRYINDEX);
+        lua_pushvalue(L, idx);
+        lua_pushvalue(L, -3);
+        lua_rawset(L, -3);
+        lua_pop(L, 1);
+        return f;
+
+    case LUA_TNIL:
+        lua_pushnil(L);
+        return NULL;
+
+    case LUA_TLIGHTUSERDATA:
+        if (check_pointers) {
+            goto err;
+        } else {
+            lua_pushnil(L);
+            return (function_t) lua_touserdata(L, idx);
+        }
+
+    case LUA_TUSERDATA:
+        p = to_cdata(L, idx, &ft);
+
+        if (!p) {
+            if (check_pointers) {
+                goto err;
+            } else {
+                lua_pushnil(L);
+                return (function_t) lua_touserdata(L, idx);
+            }
+
+        } else if (ft.is_null) {
+            return NULL;
+
+        } else if (!check_pointers && (ft.pointers || ft.type == UINTPTR_TYPE)) {
+            return (function_t) *(void**) p;
+
+        } else if (ft.type != FUNCTION_TYPE) {
+            goto err;
+
+        } else if (!check_pointers) {
+            return *(function_t*) p;
+
+        } else if (ft.calling_convention != tt->calling_convention) {
+            goto err;
+
+        } else if (!lua_rawequal(L, -1, to_usr)) {
+            goto err;
+
+        } else {
+            return *(function_t*) p;
+        }
+
+    default:
         goto err;
     }
-
-    lua_pop(L, 1);
-    return f;
 
 err:
     type_error(L, idx, NULL, to_usr, tt);
     return NULL;
 }
 
+function_t to_typed_function(lua_State* L, int idx, int to_usr, const ctype_t* tt)
+{ return to_function(L, idx, to_usr, tt, 1); }
+   
 static void set_value(lua_State* L, int idx, void* to, int to_usr, const ctype_t* tt, int check_pointers);
 
 static void set_array(lua_State* L, int idx, void* to, int to_usr, const ctype_t* tt, int check_pointers)
@@ -638,6 +668,8 @@ err:
 
 static void set_value(lua_State* L, int idx, void* to, int to_usr, const ctype_t* tt, int check_pointers)
 {
+    int top = lua_gettop(L);
+
     if (tt->is_array) {
         set_array(L, idx, to, to_usr, tt, check_pointers);
 
@@ -711,11 +743,18 @@ static void set_value(lua_State* L, int idx, void* to, int to_usr, const ctype_t
         case UNION_TYPE:
             set_struct(L, idx, to, to_usr, tt, check_pointers);
             break;
+        case FUNCTION_TYPE:
+            *(function_t*) to = to_function(L, idx, to_usr, tt, check_pointers);
+            /* note: jitted functions are tied to the lifetime of the lua
+             * function, so we can safely remove it */
+            lua_pop(L, 1);
+            break;
         default:
             goto err;
         }
     }
 
+    assert(lua_gettop(L) == top);
     return;
 err:
     type_error(L, idx, NULL, to_usr, tt);
@@ -872,12 +911,19 @@ fail:
 
 static int cdata_gc(lua_State* L)
 {
+    const ctype_t* ct = (const ctype_t*) lua_touserdata(L, 1);
+
     lua_pushvalue(L, 1);
     lua_rawget(L, GC_UPVAL);
 
     if (!lua_isnil(L, -1)) {
         lua_pushvalue(L, 1);
         lua_call(L, 1, 0);
+    }
+
+    if (ct->is_jitted) {
+        jit_t* jit = get_jit(L);
+        free_code(jit, L, *(function_t*) (ct + 1));
     }
 
     return 0;
@@ -889,7 +935,15 @@ static int ffi_gc(lua_State* L)
     lua_settop(L, 2);
     check_cdata(L, 1, &ct);
 
-    lua_pushvalue(L, 1);
+    /* for cdata functions, we want to place the gc on the embedded cdata
+     * function pointer not the lua function wrapper
+     */
+    if (lua_type(L, 1) == LUA_TFUNCTION) {
+        lua_getupvalue(L, 1, 1);
+    } else {
+        lua_pushvalue(L, 1);
+    }
+
     lua_pushvalue(L, 2);
     lua_rawset(L, GC_UPVAL);
 
@@ -956,7 +1010,6 @@ static int cdata_index(lua_State* L)
 {
     void* to;
     ctype_t ct;
-    jit_t* jit;
     char* data = lookup_cdata_index(L, &ct);
 
     if (ct.is_array) {
@@ -1050,8 +1103,7 @@ static int cdata_index(lua_State* L)
             *(void**) to = data;
             break;
         case FUNCTION_TYPE:
-            jit = (jit_t*) lua_touserdata(L, JIT_UPVAL);
-            push_function(jit, L, *(function_t*) data, -1, &ct);
+            push_function(get_jit(L), L, *(function_t*) data, -1, &ct);
             break;
         default:
             luaL_error(L, "internal error: invalid member type");
@@ -1354,7 +1406,7 @@ static int cdata_tostring(lua_State* L)
 
 static int ffi_errno(lua_State* L)
 {
-    jit_t* jit = (jit_t*) lua_touserdata(L, JIT_UPVAL);
+    jit_t* jit = get_jit(L);
 
     if (!lua_isnoneornil(L, 1)) {
         lua_pushnumber(L, jit->last_errno);
@@ -1512,7 +1564,7 @@ static int ffi_load(lua_State* L)
 static int find_function(lua_State* L, int module, int name, int usr, const ctype_t* ct)
 {
     size_t i;
-    jit_t* jit = (jit_t*) lua_touserdata(L, JIT_UPVAL);
+    jit_t* jit = get_jit(L);
     void** libs = (void**) lua_touserdata(L, module);
     size_t num = lua_rawlen(L, module) / sizeof(void*);
     const char* funcname = lua_tostring(L, name);
@@ -1591,13 +1643,26 @@ static int cmodule_index(lua_State* L)
     return luaL_error(L, "failed to find function %s", funcname);
 }
 
+static int g_jit_key;
+
+static jit_t* get_jit(lua_State* L)
+{
+    jit_t* jit;
+    lua_pushlightuserdata(L, &g_jit_key);
+    lua_rawget(L, LUA_REGISTRYINDEX);
+    jit = (jit_t*) lua_touserdata(L, -1);
+    lua_pop(L, 1);
+    jit->L = L;
+    return jit;
+}
+
 static int jit_gc(lua_State* L)
 {
     size_t i;
     jit_t* jit = (jit_t*) lua_touserdata(L, 1);
     dasm_free(jit);
     for (i = 0; i < jit->pagenum; i++) {
-        FreePage(jit->pages[i].data, jit->pages[i].size);
+        FreePage(jit->pages[i], jit->pages[i]->size);
     }
     free(jit->globals);
     return 0;
@@ -1666,8 +1731,10 @@ static void push_builtin(lua_State* L, ctype_t* ct, const char* name, int type, 
     ct->align_mask = align;
     ct->is_defined = 1;
 
-    push_ctype(L, 0, ct);
+    lua_pushnil(L);
+    push_ctype(L, -1, ct);
     lua_setfield(L, TYPE_UPVAL, name);
+    lua_pop(L, 1);
 }
 
 static void add_typedef(lua_State* L, const char* from, const char* to)
@@ -1686,7 +1753,17 @@ static void add_typedef(lua_State* L, const char* from, const char* to)
 
 static int setup_upvals(lua_State* L)
 {
-    jit_t* jit = (jit_t*) lua_touserdata(L, JIT_UPVAL);
+    jit_t* jit;
+
+    lua_pushlightuserdata(L, &g_jit_key);
+    jit = (jit_t*) lua_newuserdata(L, sizeof(jit_t));
+
+    /* setup mt */
+    lua_newtable(L);
+    luaL_setfuncs(L, jit_mt, 0);
+    lua_setmetatable(L, -2);
+
+    lua_rawset(L, LUA_REGISTRYINDEX);
 
     /* ffi.C */
     {
@@ -1747,12 +1824,8 @@ static int setup_upvals(lua_State* L)
 
     /* jit setup */
     {
+        jit->L = L;
         jit->last_errno = 0;
-
-        /* setup mt */
-        lua_newtable(L);
-        luaL_setfuncs(L, jit_mt, 0);
-        lua_setmetatable(L, JIT_UPVAL);
 
         dasm_init(jit, 1024);
 #ifdef _WIN32
@@ -1788,6 +1861,7 @@ static int setup_upvals(lua_State* L)
         lua_pushnil(L);
         push_cdata(L, -1, &ct);
         lua_setfield(L, CONSTANTS_UPVAL, "NULL");
+        lua_pop(L, 1);
 
 #define ALIGNOF(S) ((char*) &S.v - (char*) &S - 1)
 
@@ -1867,6 +1941,9 @@ static int setup_upvals(lua_State* L)
     {
         lua_pushvalue(L, WEAK_KEY_MT_UPVAL);
         lua_setmetatable(L, GC_UPVAL);
+        lua_pushlightuserdata(L, &g_gc_index);
+        lua_pushvalue(L, GC_UPVAL);
+        lua_rawset(L, LUA_REGISTRYINDEX);
     }
 
     /* ffi.os */
@@ -1922,20 +1999,18 @@ int luaopen_ffi(lua_State* L)
     lua_newtable(L); /* ffi table */
 
     /* register all C functions with the same set of upvalues in the same
-     * order, so that the CDATA_MT_UPVAL etc macros can be used from any C code
+     * order, so that the CTYPE_MT_UPVAL etc macros can be used from any C code
      *
      * also set the __metatable field on all of the metatables to stop
      * getmetatable(usr) from returning the metatable
      */
     lua_newtable(L); /* ctype_mt */
-    lua_newtable(L); /* cdata_mt */
     lua_newtable(L); /* cmodule_mt */
     lua_newtable(L); /* constants */
     lua_newtable(L); /* weak key mt table */
     lua_newtable(L); /* type table */
     lua_newtable(L); /* function table */
     lua_newtable(L); /* ABI parameters table */
-    lua_newuserdata(L, sizeof(jit_t)); /* jit state */
     lua_newtable(L); /* gc table */
     lua_getglobal(L, "tonumber");
 
@@ -1952,12 +2027,12 @@ int luaopen_ffi(lua_State* L)
     assert(lua_gettop(L) == UPVAL_NUM + 1);
 
     /* cdata_mt */
-    lua_pushvalue(L, CDATA_MT_IDX);
+    lua_newtable(L); /* cdata_mt */
     push_upvals(L, 1);
     luaL_setfuncs(L, cdata_mt, UPVAL_NUM);
     lua_pushboolean(L, 1);
     lua_setfield(L, -2, "__metatable");
-    lua_pop(L, 1);
+    set_cdata_mt(L);
 
     assert(lua_gettop(L) == UPVAL_NUM + 1);
 

@@ -1,10 +1,12 @@
 io.stdout:setvbuf('no')
 local ffi = require 'ffi'
-local dlls = {ffi.load('test_cdecl')}
+local dlls = {}
+
+dlls.__cdecl = ffi.load('test_cdecl')
 
 if ffi.arch == 'x86' and ffi.os == 'Windows' then
-    dlls[2] = ffi.load('test_stdcall')
-    dlls[3] = ffi.load('test_fastcall')
+    dlls.__stdcall = ffi.load('test_stdcall')
+    dlls.__fastcall = ffi.load('test_fastcall')
 end
 
 print('Running test')
@@ -116,6 +118,11 @@ int print_sysv4(size_t* sz, size_t* align, char* buf, union sysv4* s);
 int print_sysv5(size_t* sz, size_t* align, char* buf, struct sysv5* s);
 int print_sysv6(size_t* sz, size_t* align, char* buf, struct sysv6* s);
 int print_sysv7(size_t* sz, size_t* align, char* buf, struct sysv7* s);
+
+struct fptr {
+    int (__cdecl *p)(int);
+};
+int call_fptr(struct fptr* s, int val);
 ]]
 
 local align = [[
@@ -151,7 +158,9 @@ local function checkbuf(type, suffix, ret)
     assert(ffi.string(buf) == str and ret == #str)
 end
 
-for i,c in ipairs(dlls) do
+local first = true
+
+for convention,c in pairs(dlls) do
     assert(c.add_i8(1,1) == 2)
     assert(c.add_i8(256,1) == 1)
     assert(c.add_i8(127,1) == -128)
@@ -167,7 +176,7 @@ for i,c in ipairs(dlls) do
         local test = test_values[type]
         checkbuf(type, suffix, c['print_' .. suffix](buf, test))
 
-        if i == 1 then
+        if first then
             ffi.cdef(align:gsub('SUFFIX', suffix):gsub('TYPE', type):gsub('ALIGN', 0))
         end
 
@@ -175,7 +184,7 @@ for i,c in ipairs(dlls) do
         checkbuf(type, suffix, c['print_align_0_' .. suffix](buf, v))
 
         for _,align in ipairs{1,2,4,8,16} do
-            if i == 1 then
+            if first then
                 ffi.cdef(palign:gsub('SUFFIX', suffix):gsub('TYPE', type):gsub('ALIGN', align))
             end
 
@@ -202,6 +211,33 @@ for i,c in ipairs(dlls) do
     check('struct sysv5', '1 2 3', c.print_sysv5(psz, palign, buf, {1,2,3}))
     check('struct sysv6', '1 2 3', c.print_sysv6(psz, palign, buf, {1,2,3}))
     check('struct sysv7', '1 2 3 4 5', c.print_sysv7(psz, palign, buf, {1,2,3,4,5}))
+    
+    local cbs = [[
+    int call_i(int (*__cdecl func)(int), int arg);
+    float call_f(float (*__cdecl func)(float), float arg);
+    double call_d(double (*__cdecl func)(double), double arg);
+    const char* call_s(const char* (*__cdecl func)(const char*), const char* arg);
+    ]]
+
+    ffi.cdef(cbs:gsub('__cdecl', convention))
+
+    local u3 = ffi.new('uint64_t', 3)
+    assert(c.call_i(function(a) return 2*a end, 3) == 6)
+    assert(math.abs(c.call_d(function(a) return 2*a end, 3.2) - 6.4) < 0.0000000001)
+    assert(math.abs(c.call_f(function(a) return 2*a end, 3.2) - 6.4) < 0.000001)
+    assert(ffi.string(c.call_s(function(s) return s + u3 end, 'foobar')) == 'bar')
+
+    local fp = ffi.new('struct fptr')
+    fp.p = function(a) return 2*a end
+    assert(c.call_fptr(fp, 4) == 8)
+
+    assert(c.call_fptr({function(a) return 3*a end}, 5) == 15)
+
+    local suc, err = pcall(c.call_s, function(s) error(ffi.string(s), 0) end, 'my error')
+    assert(not suc)
+    assert(err == 'my error')
+
+    first = false
 end
 
 local c = ffi.C

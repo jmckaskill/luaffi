@@ -18,9 +18,9 @@ Platforms
 ---------
 Currently supported:
 - windows x86
-- windows x64
 - linux x86
-- linux x64
+
+Windows and linux X64 support is complete, but currently broken.
 
 OSX support is almost done, but I currently have no way of building and/or
 testing it;

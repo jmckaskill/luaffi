@@ -27,6 +27,12 @@
 | mov rcx, arg0
 | call func
 |.endmacro
+|.macro call_pii, func, arg0, arg1, arg2
+| mov r8d, arg2
+| mov edx, arg1
+| mov rcx, arg0
+| call func
+|.endmacro
 |.macro call_pp, func, arg0, arg1
 | mov rdx, arg1
 | mov rcx, arg0
@@ -34,6 +40,10 @@
 |.endmacro
 |.macro call_pi, func, arg0, arg1
 | mov edx, arg1
+| mov rcx, arg0
+| call func
+|.endmacro
+|.macro call_p, func, arg0
 | mov rcx, arg0
 | call func
 |.endmacro
@@ -73,6 +83,12 @@
 | mov rdi, arg0
 | call func
 |.endmacro
+|.macro call_pii, func, arg0, arg1, arg2
+| mov edx, arg2
+| mov esi, arg1
+| mov rdi, arg0
+| call func
+|.endmacro
 |.macro call_pp, func, arg0, arg1
 | mov rsi, arg1
 | mov rdi, arg0
@@ -80,6 +96,10 @@
 |.endmacro
 |.macro call_pi, func, arg0, arg1
 | mov esi, arg1
+| mov rdi, arg0
+| call func
+|.endmacro
+|.macro call_p, func, arg0
 | mov rdi, arg0
 | call func
 |.endmacro
@@ -111,6 +131,9 @@
 | mov dword [rsp], arg0
 | call func
 |.endmacro
+|.macro call_pii, func, arg0, arg1, arg2
+| call_pip, func, arg0, arg1, arg2
+|.endmacro
 |.macro call_pp, func, arg0, arg1
 | mov dword [rsp+4], arg1
 | mov dword [rsp], arg0
@@ -119,9 +142,12 @@
 |.macro call_pi, func, arg0, arg1
 | call_pp, func, arg0, arg1
 |.endmacro
-|.macro call_i, func, arg0
+|.macro call_p, func, arg0
 | mov dword [rsp], arg0
 | call func
+|.endmacro
+|.macro call_i, func, arg0
+| call_p, func, arg0
 |.endmacro
 |
 |.endif
@@ -130,12 +156,6 @@
 #define JUMP_SIZE (16)
 #else
 #define JUMP_SIZE (8)
-#endif
-
-#ifdef NDEBUG
-#define shred(a,b,c)
-#else
-#define shred(p,s,e) memset((p)+(s),0xCC,(e)-(s))
 #endif
 
 static void compile_errno_load(jit_t* jit, lua_State* L, uint8_t* code)
@@ -234,11 +254,10 @@ void compile_globals(jit_t* jit, lua_State* L)
     | pop rbp
     | ret
     |.endmacro
-    
+
     |.macro get_errno // note trashes registers
     | call extern GetLastError
-    | call extern ERRNO
-    | mov dword [rcx], eax
+    | mov dword [&jit->last_errno], eax
     |.endmacro
 
     /* the general idea for the return functions is:
@@ -259,25 +278,6 @@ void compile_globals(jit_t* jit, lua_State* L)
     | get_errno
     | mov eax, 0
     | epilog
-    
-    |->return_int:
-    | mov [rsp+32], eax
-    | get_errno
-    |
-    |.if X64WIN
-    | cvtsi2sd xmm1, dword [rsp+32]
-    | mov rcx, L_ARG
-    |.elif X64
-    | cvtsi2sd xmm0, dword [rsp+32]
-    | mov rdi, L_ARG
-    |.else
-    | fild dword [rsp+32]
-    | fstp qword [rsp+4]
-    | mov [rsp], L_ARG
-    |.endif
-    |
-    | call extern lua_pushnumber
-    | jmp ->return
 
     |->return_double:
     |.if X64
@@ -306,6 +306,13 @@ void compile_globals(jit_t* jit, lua_State* L)
     | mov eax, [rsp+32]
     | call_pi, extern lua_pushboolean, L_ARG, eax
     | jmp ->return
+    
+    |->return_int:
+    | mov [rsp+32], eax
+    | get_errno
+    | mov eax, [rsp+32]
+    | call_pi, extern push_int, L_ARG, eax
+    | jmp ->return
 
     |->return_uint:
     | mov [rsp+32], eax
@@ -320,7 +327,37 @@ void compile_globals(jit_t* jit, lua_State* L)
     |->too_many_arguments:
     | call_pp, extern luaL_error, L_ARG, &"too many arguments"
 
-    compile(Dst, L, NULL);
+    |->save_registers:
+    |.if X64WIN
+    | // use the provided shadow space for int registers
+    | mov [rbp+8], rcx
+    | mov [rbp+16], rdx
+    | mov [rbp+24], r8
+    | mov [rbp+32], r9
+    | // use the extra space we added for float registers
+    | movq qword [rbp-24], xmm0
+    | movq qword [rbp-32], xmm1
+    | movq qword [rbp-40], xmm2
+    | movq qword [rbp-48], xmm3
+    |.elif X64
+    | movq qword [rbp-24], xmm0
+    | movq qword [rbp-32], xmm1
+    | movq qword [rbp-40], xmm2
+    | movq qword [rbp-48], xmm3
+    | movq qword [rbp-56], xmm4
+    | movq qword [rbp-64], xmm5
+    | movq qword [rbp-72], xmm6
+    | movq qword [rbp-80], xmm7
+    | mov [rbp-88], rdi
+    | mov [rbp-96], rsi
+    | mov [rbp-104], rdx
+    | mov [rbp-112], rcx
+    | mov [rbp-120], r8
+    | mov [rbp-128], r9
+    |.endif
+    | ret
+
+    compile(Dst, L, NULL, LUA_NOREF);
 }
 
 int x86_stack_required(lua_State* L, int usr)
@@ -391,100 +428,467 @@ struct reg_alloc {
  * We use the same register allocation logic as posix x64 with 2 int regs and 0 float regs
  */
 
-void add_int32(Dst_DECL, const ctype_t* ct, struct reg_alloc* reg)
+static void get_int(Dst_DECL, const ctype_t* ct, struct reg_alloc* reg, int is_int64)
+{
+    /* grab the register from the shadow space */
+#ifdef _WIN64
+    if (reg->regs < MAX_REGISTERS(ct)) {
+        | mov rcx, [rbp + 16 + 8*reg->regs]
+        reg->regs++;
+    }
+#elif __amd64__
+    if (reg->ints < MAX_INT_REGISTERS(ct)) {
+        | mov rcx, [rbp - 88 - 8*reg->ints]
+        reg->ints++;
+    }
+#else
+    if (!is_int64 && reg->ints < MAX_INT_REGISTERS(ct) && ct->calling_convention == FAST_CALL) {
+        | mov ecx, [rbp - 12 + 4*reg->ints]
+        reg->ints++;
+    }
+#endif
+    else if (is_int64) {
+        |.if X64
+        | mov rcx, [rbp + reg->off]
+        |.else
+        | mov rcx, [rbp + reg->off]
+        | mov rdx, [rbp + reg->off + 4]
+        |.endif
+        reg->off += 8;
+    } else {
+        | mov ecx, [rbp + reg->off]
+        reg->off += 4;
+    }
+}
+
+static void add_int(Dst_DECL, const ctype_t* ct, struct reg_alloc* reg, int is_int64)
 {
 #ifdef _WIN64
     if (reg->regs < MAX_REGISTERS(ct)) {
         | mov [rsp + 32 + 8*(reg->regs)], rax
         reg->is_int[reg->regs++] = 1;
-    } else
-#else
+    }
+#elif __amd64__
     if (reg->ints < MAX_INT_REGISTERS(ct)) {
-        | mov [rsp + 32 + sizeof(void*)*reg->ints], rax
+        | mov [rsp + 32 + 8*reg->ints], rax
         reg->ints++;
-    } else
+    }
+#else
+    if (!is_int64 && reg->ints < MAX_INT_REGISTERS(ct)) {
+        | mov [rsp + 32 + 4*reg->ints], rax
+        reg->ints++;
+    }
 #endif
 
-    {
+    else if (is_int64) {
+        |.if X64
+        | mov [rsp + reg->off], rax
+        |.else
+        | mov [rsp + reg->off], RET_L
+        | mov [rsp + reg->off + 4], RET_H
+        |.endif
+        reg->off += 8;
+    } else {
         | mov [rsp+reg->off], eax
         reg->off += 4;
     }
 }
 
-void add_int64(Dst_DECL, const ctype_t* ct, struct reg_alloc* reg)
+static void get_float(Dst_DECL, const ctype_t* ct, struct reg_alloc* reg, int is_double)
 {
 #if !defined _WIN64 && !defined __amd64__
-    |.if not X64
-    | mov [rsp + reg->off], RET_L
-    | mov [rsp + reg->off + 4], RET_H
-    |.endif
-    reg->off += 8;
+    assert(MAX_FLOAT_REGISTERS(ct) == 0);
+    if (is_double) {
+        | fld qword [rbp + reg->off]
+        reg->off += 8;
+    } else {
+        | fld dword [rbp + reg->off]
+        reg->off += 4;
+    }
 #else
-
+    int off;
+    
 #ifdef _WIN64
     if (reg->regs < MAX_REGISTERS(ct)) {
-        | mov [rsp + 32 + 8*reg->regs], rax
-        reg->is_int[reg->regs++] = 1;
+        off = -24 - 8*reg->regs;
+        reg->regs++;
+    }
 #else
-    if (reg->ints < MAX_INT_REGISTERS(ct)) {
-        | mov [rsp + 32 + 8*reg->ints], rax
-        reg->ints++;
+    if (reg->floats < MAX_FLOAT_REGISTERS(ct)) {
+        off = -24 - 8*reg->floats;
+        reg->floats++;
+    }
 #endif
-
+    else {
+        off = reg->off;
+        reg->off += is_double ? 8 : 4;
+    }
+    
+    if (is_double) {
+        | movq xmm0, qword [rbp + off]
     } else {
-        | mov [rsp + reg->off], rax
-        reg->off += 8;
+        /* note this converts both rsp+off and rsp+off+4 from float->double in
+         * xmm0, but we just ignore the high double */
+        | cvtps2pd xmm0, qword [rbp + off]
     }
 #endif
 }
 
-void add_double(Dst_DECL, const ctype_t* ct, struct reg_alloc* reg, int is_float)
+static void add_float(Dst_DECL, const ctype_t* ct, struct reg_alloc* reg, int is_double)
 {
 #if !defined _WIN64 && !defined __amd64__
-    |.if not X64
     assert(MAX_FLOAT_REGISTERS(ct) == 0);
-    if (is_float) {
-        | fstp dword [rsp + reg->off]
-        reg->off += 4;
-    } else {
+    if (is_double) {
         | fstp qword [rsp + reg->off]
         reg->off += 8;
+    } else {
+        | fstp dword [rsp + reg->off]
+        reg->off += 4;
     }
 #else
-    |.else
 
 #ifdef _WIN64
     if (reg->regs < MAX_REGISTERS(ct)) {
-        if (is_float) {
+        if (!is_double) {
             | cvtpd2ps xmm0, xmm0
         }
         | movq qword [rsp + 32 + 8*(reg->regs)], xmm0
         reg->is_float[reg->regs++] = 1;
+    }
 #else
     if (reg->floats < MAX_FLOAT_REGISTERS(ct)) {
-        if (is_float) {
+        if (!is_double) {
             | cvtpd2ps xmm0, xmm0
         }
         | movq qword [rsp + 32 + 8*(MAX_INT_REGISTERS(ct) + reg->floats)], xmm0
         reg->floats++;
+    }
 #endif
 
-    } else if (is_float) {
-        | movd dword [rsp + reg->off], xmm0
-        reg->off += 4;
-    } else {
+    else if (is_double) {
         | movq qword [rsp + reg->off], xmm0
         reg->off += 8;
+    } else {
+        | movd dword [rsp + reg->off], xmm0
+        reg->off += 4;
     }
-    |.endif
 #endif
 }
 
 #if defined _WIN64 || defined __amd64__
-#define add_pointer add_int64
+#define add_pointer(jit, ct, reg) add_int(jit, ct, reg, 1)
+#define get_pointer(jit, ct, reg) get_int(jit, ct, reg, 1)
 #else
-#define add_pointer add_int32
+#define add_pointer(jit, ct, reg) add_int(jit, ct, reg, 0)
+#define get_pointer(jit, ct, reg) get_int(jit, ct, reg, 0)
 #endif
+
+function_t push_callback(jit_t* jit, lua_State* L, int fidx, int ct_usr, const ctype_t* ct)
+{
+    int i, nargs;
+    const ctype_t* mt;
+    jit_t* Dst = jit;
+    struct reg_alloc reg;
+    int num_upvals = 0;
+    int top = lua_gettop(L);
+    int ref;
+
+    ct_usr = lua_absindex(L, ct_usr);
+    fidx = lua_absindex(L, fidx);
+
+    memset(&reg, 0, sizeof(reg));
+#ifdef _WIN64
+    reg.off = 16 + REGISTER_STACK_SPACE(ct); /* stack registers are above the shadow space */
+#elif __amd64__
+    reg.off = 16;
+#else
+    reg.off = 8;
+#endif
+
+    dasm_setup(Dst, build_actionlist);
+
+    nargs = (int) lua_rawlen(L, ct_usr);
+    lua_newtable(L);
+    lua_pushvalue(L, -1);
+    ref = luaL_ref(L, LUA_REGISTRYINDEX);
+
+    if (ct->has_var_arg) {
+        luaL_error(L, "can't create callbacks with varargs");
+    }
+
+    | // int 3
+    | push rbp
+    | mov rbp, rsp
+    | push L_ARG
+    | // stack is 4 or 8 (mod 16) (L_ARG, rbp, rip)
+    |.if X64
+    | // 8 to realign, 16 for return vars, 32 for local calls, rest to save registers
+    | sub rsp, 56 + REGISTER_STACK_SPACE(ct)
+    | call ->save_registers
+    |.else
+    | // 4 to realign, 16 for return vars, 32 for local calls, rest to save registers
+    | sub rsp, 52 + REGISTER_STACK_SPACE(ct)
+    if (ct->calling_convention == FAST_CALL) {
+        | mov [rbp-12], ecx
+        | mov [rbp-16], edx
+    }
+    |.endif
+
+    | mov L_ARG, L
+
+    /* get the upval table */
+    | call_pii, extern lua_rawgeti, L_ARG, LUA_REGISTRYINDEX, ref
+
+    /* get the lua function */
+    lua_pushvalue(L, fidx);
+    lua_rawseti(L, -2, ++num_upvals);
+    | call_pii, extern lua_rawgeti, L_ARG, -1, num_upvals
+
+    for (i = 1; i <= nargs; i++) {
+        lua_rawgeti(L, ct_usr, i);
+        mt = (const ctype_t*) lua_touserdata(L, -1);
+
+        if (mt->pointers) {
+            lua_getuservalue(L, -1);
+            lua_rawseti(L, -3, ++num_upvals); /* usr value */
+            lua_rawseti(L, -2, ++num_upvals); /* mt */
+            /* on the lua stack in the callback:
+             * upval tbl, lua func, i-1 args
+             */
+            | call_pii, extern lua_rawgeti, L_ARG, -i-1, num_upvals-1
+            | call_pip, extern push_cdata, L_ARG, -1, mt
+            get_pointer(jit, ct, &reg);
+            | mov [rax], rcx
+            | call_pi, &lua_remove, L_ARG, -2
+        } else {
+            switch (mt->type) {
+            case INT64_TYPE:
+            case UINT64_TYPE:
+                lua_rawseti(L, -2, ++num_upvals);
+                | call_p, extern lua_pushnil, L_ARG
+                | call_pip, extern push_cdata, L_ARG, -1, mt
+                get_int(jit, ct, &reg, 1);
+                |.if X64
+                | mov [rax], rcx
+                |.else
+                | mov [rax], ecx
+                | mov [rax+4], edx
+                |.endif
+                | call_pi, &lua_remove, L_ARG, -2
+                break;
+
+            case BOOL_TYPE:
+                get_int(jit, ct, &reg, 0);
+                | call_pi, extern lua_pushboolean, L_ARG, ecx
+                lua_pop(L, 1);
+                break;
+
+            case INT8_TYPE:
+                get_int(jit, ct, &reg, 0);
+                | movsx ecx, cl
+                | call_pi, extern push_int, L_ARG, ecx
+                lua_pop(L, 1);
+                break;
+
+            case UINT8_TYPE:
+                get_int(jit, ct, &reg, 0);
+                | movzx ecx, cl
+                | call_pi, extern push_uint, L_ARG, ecx
+                lua_pop(L, 1);
+                break;
+
+            case INT16_TYPE:
+                get_int(jit, ct, &reg, 0);
+                | movsx ecx, cx
+                | call_pi, extern push_int, L_ARG, ecx
+                lua_pop(L, 1);
+                break;
+
+            case UINT16_TYPE:
+                get_int(jit, ct, &reg, 0);
+                | movzx ecx, cx
+                | call_pi, extern push_uint, L_ARG, ecx
+                lua_pop(L, 1);
+                break;
+
+            case INT32_TYPE:
+                get_int(jit, ct, &reg, 0);
+                | call_pi, extern push_int, L_ARG, ecx
+                lua_pop(L, 1);
+                break;
+
+            case UINT32_TYPE:
+                get_int(jit, ct, &reg, 0);
+                | call_pi, extern push_uint, L_ARG, ecx
+                lua_pop(L, 1);
+                break;
+
+            case FLOAT_TYPE:
+            case DOUBLE_TYPE:
+                get_float(jit, ct, &reg, mt->type == DOUBLE_TYPE);
+                |.if X64WIN
+                | mov rcx, L_ARG
+                |.elif X64
+                | mov rdi, L_ARG
+                |.else
+                | fstp qword [rsp+4]
+                | mov [rsp], L_ARG
+                |.endif
+                | call extern lua_pushnumber
+                lua_pop(L, 1);
+                break;
+
+            default:
+                luaL_error(L, "NYI: callback arg type");
+            }
+        }
+    }
+
+    lua_rawgeti(L, ct_usr, 0);
+    mt = (const ctype_t*) lua_touserdata(L, -1);
+
+    | call_pii, extern lua_call, L_ARG, nargs, (mt->pointers || mt->type != VOID_TYPE) ? 1 : 0
+
+    if (mt->pointers) {
+        lua_getuservalue(L, -1);
+        lua_rawseti(L, -3, ++num_upvals); /* usr value */
+        lua_rawseti(L, -2, ++num_upvals); /* mt */
+        | call_pii, extern lua_rawgeti, L_ARG, -2, num_upvals-1
+        | call_piip, extern to_typed_pointer, L_ARG, -2, -1, mt
+        | mov [rsp+32], rax
+        | call_pi, extern lua_settop, L_ARG, -4
+        | mov rax, [rsp+32]
+        
+    } else {
+        switch (mt->type) {
+        case ENUM_TYPE:
+            lua_getuservalue(L, -1);
+            lua_rawseti(L, -3, ++num_upvals); /* usr value */
+            lua_rawseti(L, -2, ++num_upvals); /* mt */
+            | call_pii, extern lua_rawgeti, L_ARG, -2, num_upvals-1
+            | call_piip, extern to_enum, L_ARG, -2, -1, mt
+            | mov [rsp+32], eax
+            | call_pi, extern lua_settop, L_ARG, -4
+            | mov eax, [rsp+32]
+            break;
+
+        case VOID_TYPE:
+            | call_pi, extern lua_settop, L_ARG, -2
+            lua_pop(L, 1);
+            break;
+
+        case BOOL_TYPE:
+        case INT8_TYPE:
+        case INT16_TYPE:
+        case INT32_TYPE:
+            | call_pi, extern to_int32, L_ARG, -1
+            | mov [rsp+32], eax
+            | call_pi, extern lua_settop, L_ARG, -3
+            | mov eax, [rsp+32]
+            lua_pop(L, 1);
+            break;
+
+        case UINT8_TYPE:
+        case UINT16_TYPE:
+        case UINT32_TYPE:
+            | call_pi, extern to_uint32, L_ARG, -1 
+            | mov [rsp+32], eax
+            | call_pi, extern lua_settop, L_ARG, -3
+            | mov eax, [rsp+32]
+            lua_pop(L, 1);
+            break;
+
+        case INT64_TYPE:
+            | call_pi, extern to_int64, L_ARG, -1
+            goto ret64;
+
+        case UINT64_TYPE:
+            | call_pi, extern to_uint64, L_ARG, -1
+            goto ret64;
+
+        ret64:
+            |.if X64
+            | mov [rsp+32], rax
+            |.else
+            | mov [rsp+32], RET_L
+            | mov [rsp+36], RET_H
+            |.endif
+            | call_pi, extern lua_settop, L_ARG, -3
+            |.if X64
+            | mov rax, [rsp+32]
+            |.else
+            | mov RET_L, [rsp+32]
+            | mov RET_H, [rsp+36]
+            |.endif
+            lua_pop(L, 1);
+            break;
+
+        case UINTPTR_TYPE:
+            | call_pi, extern to_uintptr, L_ARG, -1
+            | mov [rsp+32], rax
+            | call_pi, extern lua_settop, L_ARG, -3
+            | mov rax, [rsp+32]
+            lua_pop(L, 1);
+            break;
+
+        case FLOAT_TYPE:
+        case DOUBLE_TYPE:
+            | call_pi, extern to_double, L_ARG, -1
+            |.if X64
+            | movq qword [rsp+32], xmm0
+            | call_pi, extern lua_settop, L_ARG, -3
+            if (mt->type == FLOAT_TYPE) {
+                | cvtpd2ps xmm0, [rsp+32]
+            } else {
+                | movq xmm0, qword [rsp+32]
+            }
+            |.else
+            | fstp qword [rsp+32]
+            | call_pi, extern lua_settop, L_ARG, -3
+            | fld qword [rsp+32]
+            |.endif
+            lua_pop(L, 1);
+            break;
+
+        default:
+            luaL_error(L, "NYI: callback return type");
+        }
+    }
+
+    |.if X64
+    | mov L_ARG, [rbp-8]
+    |.else
+    | mov L_ARG, [rbp-4]
+    |.endif
+    | mov rsp, rbp
+    | pop rbp
+
+    if (ct->calling_convention == FAST_CALL || ct->calling_convention == STD_CALL) {
+        | ret x86_stack_required(L, ct_usr)
+    } else {
+        | ret
+    }
+
+    lua_pop(L, 1); /* upval table - already in registry */
+    assert(lua_gettop(L) == top);
+
+    {
+        void* p;
+        ctype_t ft;
+        function_t func;
+
+        func = compile(jit, L, NULL, ref);
+
+        ft = *ct;
+        ft.is_jitted = 1;
+        p = push_cdata(L, ct_usr, &ft);
+        *(function_t*) p = func;
+
+        assert(lua_gettop(L) == top + 1);
+
+        return func;
+    }
+}
 
 void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const ctype_t* ct)
 {
@@ -493,16 +897,19 @@ void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const 
     const ctype_t* mbr_ct;
     jit_t* Dst = jit;
     struct reg_alloc reg;
+    void* p;
+    int top = lua_gettop(L);
+
+    ct_usr = lua_absindex(L, ct_usr);
 
     memset(&reg, 0, sizeof(reg));
     reg.off = 32 + REGISTER_STACK_SPACE(ct);
 
     dasm_setup(Dst, build_actionlist);
 
-    lua_pushvalue(L, ct_usr);
-    ct_usr = lua_gettop(L);
-    lua_pushvalue(L, CDATA_MT_UPVAL); /* so that CDATA_MT_UPVAL works within the closure */
-    num_upvals = 2;
+    p = push_cdata(L, ct_usr, ct);
+    *(function_t*) p = func;
+    num_upvals = 1;
 
     nargs = lua_rawlen(L, ct_usr);
 
@@ -560,7 +967,7 @@ void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const 
             case FUNCTION_TYPE:
                 lua_getuservalue(L, -1);
                 num_upvals += 2;
-                | call_piip, extern to_typed_pointer, L_ARG, i, lua_upvalueindex(num_upvals), mbr_ct
+                | call_piip, extern to_typed_function, L_ARG, i, lua_upvalueindex(num_upvals), mbr_ct
                 add_pointer(Dst, ct, &reg);
                 break;
 
@@ -568,46 +975,46 @@ void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const 
                 lua_getuservalue(L, -1);
                 num_upvals += 2;
                 | call_piip, extern to_enum, L_ARG, i, lua_upvalueindex(num_upvals), mbr_ct
-                add_int32(Dst, ct, &reg);
+                add_int(Dst, ct, &reg, 0);
                 break;
 
             case INT8_TYPE:
                 | call_pi, extern to_int32, L_ARG, i
                 | movsx eax, al
-                add_int32(Dst, ct, &reg);
+                add_int(Dst, ct, &reg, 0);
                 lua_pop(L, 1);
                 break;
 
             case UINT8_TYPE:
                 | call_pi, extern to_uint32, L_ARG, i
                 | movzx eax, al
-                add_int32(Dst, ct, &reg);
+                add_int(Dst, ct, &reg, 0);
                 lua_pop(L, 1);
                 break;
 
             case INT16_TYPE:
                 | call_pi, extern to_int32, L_ARG, i
                 | movsx eax, ax
-                add_int32(Dst, ct, &reg);
+                add_int(Dst, ct, &reg, 0);
                 lua_pop(L, 1);
                 break;
 
             case UINT16_TYPE:
                 | call_pi, extern to_uint32, L_ARG, i
                 | movzx eax, ax
-                add_int32(Dst, ct, &reg);
+                add_int(Dst, ct, &reg, 0);
                 lua_pop(L, 1);
                 break;
 
             case INT32_TYPE:
                 | call_pi, extern to_int32, L_ARG, i
-                add_int32(Dst, ct, &reg);
+                add_int(Dst, ct, &reg, 0);
                 lua_pop(L, 1);
                 break;
 
             case UINT32_TYPE:
                 | call_pi, extern to_uint32, L_ARG, i
-                add_int32(Dst, ct, &reg);
+                add_int(Dst, ct, &reg, 0);
                 lua_pop(L, 1);
                 break;
 
@@ -619,25 +1026,25 @@ void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const 
             
             case INT64_TYPE:
                 | call_pi, extern to_int64, L_ARG, i
-                add_int64(Dst, ct, &reg);
+                add_int(Dst, ct, &reg, 1);
                 lua_pop(L, 1);
                 break;
             
             case UINT64_TYPE:
                 | call_pi, extern to_uint64, L_ARG, i
-                add_int64(Dst, ct, &reg);
+                add_int(Dst, ct, &reg, 1);
                 lua_pop(L, 1);
                 break;
 
             case DOUBLE_TYPE:
                 | call_pi, extern to_double, L_ARG, i
-                add_double(Dst, ct, &reg, 0);
+                add_float(Dst, ct, &reg, 1);
                 lua_pop(L, 1);
                 break;
 
             case FLOAT_TYPE:
                 | call_pi, extern to_double, L_ARG, i
-                add_double(Dst, ct, &reg, 1);
+                add_float(Dst, ct, &reg, 0);
                 lua_pop(L, 1);
                 break;
 
@@ -709,8 +1116,7 @@ void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const 
 #endif
     }
 
-    | call extern ERRNO
-    | mov eax, dword [rcx]
+    | mov eax, dword [&jit->last_errno]
     | call_i, extern SetLastError, eax
 
     /* remove the stack space to call local functions */
@@ -862,7 +1268,8 @@ void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const 
             |.endif
             |
             | get_errno
-            | call_pip, extern push_cdata, L_ARG, lua_upvalueindex(num_upvals), mbr_ct
+            | call_p, extern lua_pushnil, L_ARG
+            | call_pip, extern push_cdata, L_ARG, -1, mbr_ct
             |
             | // *(int64_t*) cdata = val
             |.if X64
@@ -937,7 +1344,7 @@ void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const 
         }
     }
 
-    assert(lua_gettop(L) == ct_usr + num_upvals - 1);
-    lua_pushcclosure(L, (lua_CFunction) compile(Dst, L, func), num_upvals);
+    assert(lua_gettop(L) == top + num_upvals);
+    lua_pushcclosure(L, (lua_CFunction) compile(Dst, L, func, LUA_NOREF), num_upvals);
 }
 

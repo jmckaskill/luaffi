@@ -688,9 +688,9 @@ static int parse_record(lua_State* L, parser_t* P, ctype_t* ct)
         lua_pop(L, 1); /* old next_unnamed */
     }
 
-    /* this may just be a declaration or use of the type as an argument or
-     * member */
     if (tok.type != TOK_OPEN_CURLY) {
+        /* this may just be a declaration or use of the type as an argument or
+         * member */
         put_back(P);
         return 0;
     }
@@ -1290,9 +1290,6 @@ const char* parse_argument(lua_State* L, parser_t* P, int ct_usr, ctype_t* type,
                     require_token(L, P, &tok);
                 }
 
-                /* function declarations and single function pointers are just
-                 * FUNCTION_TYPE
-                 */
                 if (type->pointers > 0) {
                     type->pointers--;
                 }
@@ -1512,7 +1509,7 @@ static int parse_root(lua_State* L, parser_t* P)
             parse_type(L, P, &type);
             name = parse_argument(L, P, -1, &type, &namesz);
 
-            if (type.type < ENUM_TYPE || type.pointers) {
+            if (type.pointers || (type.type != ENUM_TYPE && type.type != UNION_TYPE && type.type != STRUCT_TYPE && type.type != FUNCTION_TYPE)) {
                 return luaL_error(L, "unexpected type in root on line %d", P->line);
             }
 
