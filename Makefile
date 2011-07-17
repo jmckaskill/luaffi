@@ -2,7 +2,7 @@
 
 LUA_CFLAGS=`pkg-config --cflags lua5.1`
 LUA=lua5.1
-CFLAGS=-O2 -fPIC -Wall -Werror $(LUA_CFLAGS) -fvisibility=hidden -Wno-unused-function
+CFLAGS=$(MYCFLAGS) -O2 -fPIC -Wall -Werror $(LUA_CFLAGS) -fvisibility=hidden -Wno-unused-function
 
 all: ffi.so test_cdecl.so
 
