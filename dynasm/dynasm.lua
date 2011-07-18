@@ -110,7 +110,11 @@ end
 
 -- Emit an error. Processing continues with next statement.
 local function werror(msg)
-  error(format("%s:%s: error: %s:\n%s", g_fname, g_lineno, msg, g_curline), 0)
+  if g_opt.vserror then
+    error(format("%s(%s) : error: %s:\n%s", g_fname, g_lineno, msg, g_curline), 0)
+  else
+    error(format("%s:%s: error: %s:\n%s", g_fname, g_lineno, msg, g_curline), 0)
+  end
 end
 
 -- Emit a fatal error. Processing stops.
@@ -984,6 +988,8 @@ Usage: dynasm [OPTION]... INFILE.dasc|-
   -L, --nolineno       Suppress CPP line number information in output.
   -F, --flushline      Flush action list for every line.
 
+  -E, --vserror        Use Visual Studio style errors file(line) vs file:line
+
   -D NAME[=SUBST]      Define a substitution.
   -U NAME              Undefine a substitution.
 
@@ -1009,6 +1015,7 @@ function opt_map.nocomment() g_opt.comment = false end
 function opt_map.maccomment() g_opt.maccomment = true end
 function opt_map.nolineno() g_opt.cpp = false end
 function opt_map.flushline() g_opt.flushline = true end
+function opt_map.vserror() g_opt.vserror = true end
 function opt_map.dumpdef() g_opt.dumpdef = g_opt.dumpdef + 1 end
 
 ------------------------------------------------------------------------------
@@ -1019,6 +1026,7 @@ local opt_alias = {
   o = "outfile", I = "include",
   c = "ccomment", C = "cppcomment", N = "nocomment", M = "maccomment",
   L = "nolineno", F = "flushline",
+  E = "vserror",
   P = "dumpdef", A = "dumparch",
 }
 
