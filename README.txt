@@ -17,10 +17,8 @@ https://github.com/jmckaskill/luaffi
 Platforms
 ---------
 Currently supported:
-- windows x86
-- linux x86
-
-Windows and linux X64 support is complete, but currently broken.
+- windows x86/x64
+- linux x86/x64
 
 OSX support is almost done, but I currently have no way of building and/or
 testing it;
