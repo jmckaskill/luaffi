@@ -123,6 +123,9 @@ struct fptr {
     int (__cdecl *p)(int);
 };
 int call_fptr(struct fptr* s, int val);
+
+void set_errno(int val);
+int get_errno(void);
 ]]
 
 local align = [[
@@ -236,6 +239,12 @@ for convention,c in pairs(dlls) do
     local suc, err = pcall(c.call_s, function(s) error(ffi.string(s), 0) end, 'my error')
     assert(not suc)
     assert(err == 'my error')
+
+    assert(ffi.errno() == c.get_errno())
+    c.set_errno(3)
+    assert(ffi.errno() == 3 and c.get_errno() == 3)
+    assert(ffi.errno(4) == 3)
+    assert(ffi.errno() == 4 and c.get_errno() == 4)
 
     first = false
 end

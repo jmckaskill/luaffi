@@ -3,6 +3,12 @@
 #include <inttypes.h>
 #include <stddef.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <errno.h>
+#endif
+
 #ifdef __cplusplus
 # define EXTERN_C extern "C"
 #else
@@ -255,4 +261,24 @@ EXPORT int call_fptr(struct fptr* s, int val);
 int call_fptr(struct fptr* s, int val) {
     return (s->p)(val);
 }
+
+EXPORT void set_errno(int val);
+EXPORT int get_errno(void);
+
+void set_errno(int val) {
+#ifdef _WIN32
+    SetLastError(val);
+#else
+    errno = val;
+#endif
+}
+
+int get_errno(void) {
+#ifdef _WIN32
+    return GetLastError();
+#else
+    return errno;
+#endif
+}
+
 
