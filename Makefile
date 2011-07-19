@@ -9,13 +9,13 @@ all: ffi.so test_cdecl.so
 clean: 
 	rm -f *.o *.so call_*.h
 
-call_x86.h: call_x86.dasc
+call_x86.h: call_x86.dasc dynasm/*.lua
 	$(LUA) dynasm/dynasm.lua -LN -o $@ $<
 
-call_x64.h: call_x86.dasc
+call_x64.h: call_x86.dasc dynasm/*.lua
 	$(LUA) dynasm/dynasm.lua -D X64 -LN -o $@ $<
 
-call_x64win.h: call_x86.dasc
+call_x64win.h: call_x86.dasc dynasm/*.lua
 	$(LUA) dynasm/dynasm.lua -D X64 -D X64WIN -LN -o $@ $<
 
 %.o: %.c *.h dynasm/*.h call_x86.h call_x64.h call_x64win.h

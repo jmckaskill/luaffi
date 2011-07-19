@@ -1704,8 +1704,8 @@ if x64 then
       end
     end
     wputop(sz, opcode, rex)
-    waction("IMM_D", format("(unsigned int)(%s)", op64))
-    waction("IMM_D", format("(unsigned int)((%s)>>32)", op64))
+    waction("IMM_D", format("(unsigned int)((uintptr_t)(%s))", op64))
+    waction("IMM_D", format("(unsigned int)(((uintptr_t)(%s))>>32)", op64))
   end
 end
 

@@ -157,6 +157,7 @@ static void* reserve_code(jit_t* jit, lua_State* L, size_t sz)
         ADDFUNC(jit->lua_dll, lua_pushnil);
         ADDFUNC(jit->lua_dll, lua_call);
         ADDFUNC(jit->lua_dll, lua_settop);
+        ADDFUNC(jit->lua_dll, lua_remove);
 #undef ADDFUNC
 
         for (i = 0; extnames[i] != NULL; i++) {
