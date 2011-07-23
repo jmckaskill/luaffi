@@ -1699,6 +1699,7 @@ static const luaL_Reg cmodule_mt[] = {
 
 static const luaL_Reg jit_mt[] = {
     {"__gc", &jit_gc},
+    {NULL, NULL}
 };
 
 static const luaL_Reg ffi_reg[] = {
