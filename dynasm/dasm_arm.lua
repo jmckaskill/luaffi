@@ -36,7 +36,7 @@ local wline, werror, wfatal, wwarn
 local action_names = {
   "STOP", "SECTION", "ESC", "REL_EXT",
   "ALIGN", "REL_LG", "LABEL_LG",
-  "REL_PC", "LABEL_PC", "IMM", "IMM12", "IMM16", "IMML8", "IMML12",
+  "REL_PC", "LABEL_PC", "LONG", "IMM", "IMM12", "IMM16", "IMML8", "IMML12",
 }
 
 -- Maximum number of section buffer positions for dasm_put().
@@ -821,10 +821,13 @@ map_op[".long_*"] = function(params)
   if not params then return "imm..." end
   for _,p in ipairs(params) do
     local n = tonumber(p)
-    if not n then werror("bad immediate `"..p.."'") end
-    if n < 0 then n = n + 2^32 end
-    wputw(n)
-    if secpos+2 > maxsecpos then wflush() end
+    if n then
+      if n < 0 then n = n + 2^32 end
+      wputw(n)
+      if secpos+2 > maxsecpos then wflush() end
+    else
+      waction("LONG", 0, format("(uintptr_t)(%s)", p))
+    end
   end
 end
 
