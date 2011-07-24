@@ -19,9 +19,10 @@ Platforms
 Currently supported:
 - windows x86/x64
 - linux x86/x64
+- windows CE ARM little endian (ARMv4+)
 
 OSX support is almost done, but I currently have no way of building and/or
-testing it;
+testing it.
 
 Currently only dll builds are supported (ie no static).
 
@@ -39,6 +40,11 @@ On windows use msvcbuild.bat in a visual studio cmd prompt. Available targets ar
 
 Edit msvcbuild.bat if your lua exe, lib, lua include path, or lua dll name
 differ from c:\Lua5.1 and lua5.1.dll.
+
+The build script does not build for CE as this is non-trivial and very
+dependent on which CE profile (or even a custom one). Instead to build on CE,
+add generate_call_h.bat as a pre-build event and then build *.c with UNDER_CE
+defined plus whatever defines windows.h requires.
 
 On posix use make. Available targets are:
 - nothing or all: default release build
@@ -70,7 +76,6 @@ windows.
 
 Todo
 ----
-- Lua function callbacks
 - static const int
 - C++ classes (excluding inline c++ functions)
 - All the various gcc and msvc attributes

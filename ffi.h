@@ -1,5 +1,9 @@
 #pragma once
 
+#ifdef _MSC_VER
+#define _CRT_SECURE_NO_WARNINGS
+#endif
+
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -38,7 +42,7 @@ typedef struct jit_t jit_t;
 
 #include "dynasm/dasm_proto.h"
 
-#if defined _WIN32
+#if defined LUA_FFI_BUILD_AS_DLL
 # define EXPORT __declspec(dllexport)
 #elif defined __GNUC__
 # define EXPORT __attribute__((visibility("default")))
@@ -53,6 +57,10 @@ static int lua_absindex(lua_State* L, int idx) {
     return (LUA_REGISTRYINDEX <= idx && idx < 0)
          ? lua_gettop(L) + idx + 1
          : idx;
+}
+static void lua_callk(lua_State *L, int nargs, int nresults, int ctx, lua_CFunction k)
+{
+    lua_call(L, nargs, nresults);
 }
 /*
 ** set functions from list 'l' into table at top - 'nup'; each
@@ -77,20 +85,53 @@ static void luaL_setfuncs (lua_State *L, const luaL_Reg *l, int nup) {
 
 
 #ifdef _WIN32
-#define LIB_FORMAT_1 "%s.dll"
-#define AllocPage(size) VirtualAlloc(NULL, size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE)
-#define FreePage(data, size) VirtualFree(data, 0, MEM_RELEASE)
-#define EnableExecute(data, size) do {DWORD old; VirtualProtect(data, size, PAGE_EXECUTE, &old);} while (0)
-#define EnableWrite(data, size) do {DWORD old; VirtualProtect(data, size, PAGE_READWRITE, &old);} while (0)
+
+#   ifdef UNDER_CE
+        static void* DoLoadLibraryA(const char* name) {
+          wchar_t buf[MAX_PATH];
+          int sz = MultiByteToWideChar(CP_UTF8, 0, name, -1, buf, 512);
+          if (sz > 0) {
+            buf[sz] = 0;
+            return LoadLibraryW(buf);
+          } else {
+            return NULL;
+          }
+        }
+        static void* DoGetModuleHandleA(const char* name) {
+          wchar_t buf[MAX_PATH];
+          int sz = MultiByteToWideChar(CP_UTF8, 0, name, -1, buf, 512);
+          if (sz > 0) {
+            buf[sz] = 0;
+            return GetModuleHandleW(buf);
+          } else {
+            return NULL;
+          }
+        }
+#       define LoadLibraryA DoLoadLibraryA
+#       define GetModuleHandleA DoGetModuleHandleA
+#   else
+#       define GetProcAddressA GetProcAddress
+#   endif
+
+#   define LIB_FORMAT_1 "%s.dll"
+#   define AllocPage(size) VirtualAlloc(NULL, size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE)
+#   define FreePage(data, size) VirtualFree(data, 0, MEM_RELEASE)
+#   define EnableExecute(data, size) do {DWORD old; VirtualProtect(data, size, PAGE_EXECUTE, &old); FlushInstructionCache(GetCurrentProcess(), data, size);} while (0)
+#   define EnableWrite(data, size) do {DWORD old; VirtualProtect(data, size, PAGE_READWRITE, &old);} while (0)
+
 #else
-#define LIB_FORMAT_1 "%s.so"
-#define LIB_FORMAT_2 "lib%s.so"
-#define LoadLibraryA(name) dlopen(name, RTLD_NOW | RTLD_GLOBAL)
-#define GetProcAddress(lib, name) dlsym(lib, name)
-#define AllocPage(size) mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0)
-#define FreePage(data, size) munmap(data, size)
-#define EnableExecute(data, size) mprotect(data, size, PROT_READ|PROT_EXEC)
-#define EnableWrite(data, size) mprotect(data, size, PROT_READ|PROT_WRITE)
+#   define LIB_FORMAT_1 "%s.so"
+#   define LIB_FORMAT_2 "lib%s.so"
+#   define LoadLibraryA(name) dlopen(name, RTLD_NOW | RTLD_GLOBAL)
+#   define GetProcAddressA(lib, name) dlsym(lib, name)
+#   define AllocPage(size) mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0)
+#   define FreePage(data, size) munmap(data, size)
+#   define EnableExecute(data, size) mprotect(data, size, PROT_READ|PROT_EXEC)
+#   define EnableWrite(data, size) mprotect(data, size, PROT_READ|PROT_WRITE)
+#endif
+
+#if defined _M_IX86 || defined _M_X64 || defined __amd64__ || defined __i386__
+#define ALLOW_MISALIGNED_ACCESS
 #endif
 
 typedef struct {
@@ -283,6 +324,7 @@ int get_extern(jit_t* jit, uint8_t* addr, int idx, int type);
 
 /* WARNING: assembly needs to be updated for prototype changes of these functions */
 double to_double(lua_State* L, int idx);
+float to_float(lua_State* L, int idx);
 uint64_t to_uint64(lua_State* L, int idx);
 int64_t to_int64(lua_State* L, int idx);
 int32_t to_int32(lua_State* L, int idx);

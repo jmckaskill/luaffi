@@ -28,10 +28,7 @@
 #pragma once
 
 
-#ifndef _MSC_VER
-#include_next <stdbool.h>
-
-#elif defined __cplusplus
+#if defined __cplusplus
 typedef bool _Bool;
 
 #else

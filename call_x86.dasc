@@ -166,42 +166,14 @@
 |.endif
 
 #if defined _WIN64 || defined __amd64__
-#define JUMP_SIZE (16)
+#define JUMP_SIZE 14
 #else
-#define JUMP_SIZE (8)
+#define JUMP_SIZE 4
 #endif
 
-static void compile_errno_load(jit_t* jit, lua_State* L, uint8_t* code)
-{
-    /* create a stub which returns the value of &jit->last_errno in rcx
-     *
-     * manually setup the commands so a) we can use rip relative displacement
-     * and (dynasm doesn't support this) b) the jit state already has commands
-     * buffered up
-     */
-#if defined _WIN64 || defined __amd64__
-    /* lea rcx, [rip+1]
-     * ret
-     * &jit->last_errno
-     */
-    code[0] = 0x48; /* REX.W */
-    code[1] = 0x8B; /* mov */
-    code[2] = 0x0D; /* disp32 to rcx */
-    *(int32_t*) &code[3] = 1;
-    code[7] = 0xC3; /* ret */
-    *(void**) &code[8] = &jit->last_errno;
-    shred(code, 16, JUMP_SIZE);
-#else
-    /* lea rcx, &jit->last_errno
-     * ret
-     */
-    code[0] = 0x8D; /* lea */
-    code[1] = 0x0D; /* disp32 to ecx */
-    *(void**) &code[2] = &jit->last_errno;
-    code[6] = 0xC3; /* ret */
-    shred(code, 7, JUMP_SIZE);
-#endif
-}
+#define MIN_BRANCH INT32_MIN
+#define MAX_BRANCH INT32_MAX
+#define BRANCH_OFF 4
 
 static void compile_extern_jump(jit_t* jit, lua_State* L, function_t func, uint8_t* code)
 {
@@ -224,10 +196,8 @@ static void compile_extern_jump(jit_t* jit, lua_State* L, function_t func, uint8
     code[8] = 0xFF; /* FF /4 operand for jmp */
     code[9] = 0x25; /* RIP displacement */
     *(int32_t*) &code[10] = -14;
-    shred(code, 14, JUMP_SIZE);
 #else
     *(function_t*) code = func;
-    shred(code, 4, JUMP_SIZE);
 #endif
 }
 
@@ -681,7 +651,7 @@ function_t push_callback(jit_t* jit, lua_State* L, int fidx, int ct_usr, const c
             switch (mt->type) {
             case INT64_TYPE:
             case UINT64_TYPE:
-                lua_rawseti(L, -2, ++num_upvals);
+                lua_rawseti(L, -2, ++num_upvals); /* mt */
                 | call_r extern lua_pushnil, L_ARG
                 | call_rrp extern push_cdata, L_ARG, -1, mt
                 get_int(jit, ct, &reg, 1);
@@ -691,6 +661,15 @@ function_t push_callback(jit_t* jit, lua_State* L, int fidx, int ct_usr, const c
                 | mov [rax], ecx
                 | mov [rax+4], edx
                 |.endif
+                | call_rr extern lua_remove, L_ARG, -2
+                break;
+
+            case UINTPTR_TYPE:
+                lua_rawseti(L, -2, ++num_upvals);
+                | call_r extern lua_pushnil, L_ARG
+                | call_rrp extern push_cdata, L_ARG, -1, mt
+                get_pointer(jit, ct, &reg);
+                | mov [rax], rcx
                 | call_rr extern lua_remove, L_ARG, -2
                 break;
 
@@ -728,6 +707,7 @@ function_t push_callback(jit_t* jit, lua_State* L, int fidx, int ct_usr, const c
                 lua_pop(L, 1);
                 break;
 
+            case ENUM_TYPE:
             case INT32_TYPE:
                 get_int(jit, ct, &reg, 0);
                 | call_rr extern push_int, L_ARG, rcx
@@ -764,7 +744,7 @@ function_t push_callback(jit_t* jit, lua_State* L, int fidx, int ct_usr, const c
     lua_rawgeti(L, ct_usr, 0);
     mt = (const ctype_t*) lua_touserdata(L, -1);
 
-    | call_rrr extern lua_call, L_ARG, nargs, (mt->pointers || mt->type != VOID_TYPE) ? 1 : 0
+    | call_rrrp extern lua_callk, L_ARG, nargs, (mt->pointers || mt->type != VOID_TYPE) ? 1 : 0, 0
 
     if (mt->pointers) {
         lua_getuservalue(L, -1);
@@ -1364,6 +1344,6 @@ void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const 
     }
 
     assert(lua_gettop(L) == top + num_upvals);
-    lua_pushcclosure(L, (lua_CFunction) compile(Dst, L, func, LUA_NOREF), num_upvals);
+    lua_pushcclosure(L, (lua_CFunction) compile(jit, L, func, LUA_NOREF), num_upvals);
 }
 

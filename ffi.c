@@ -122,6 +122,9 @@ uint64_t to_uint64(lua_State* L, int idx)
 double to_double(lua_State* L, int idx)
 { TO_NUMBER(double, 0); }
 
+float to_float(lua_State* L, int idx)
+{ TO_NUMBER(float, 0); }
+
 uintptr_t to_uintptr(lua_State* L, int idx)
 { TO_NUMBER(uintptr_t, 1); }
 
@@ -674,16 +677,29 @@ static void set_value(lua_State* L, int idx, void* to, int to_usr, const ctype_t
         set_array(L, idx, to, to_usr, tt, check_pointers);
 
     } else if (tt->pointers) {
+        union {
+            uint8_t c[sizeof(void*)];
+            void* p;
+        } u;
 
         if (lua_istable(L, idx)) {
             luaL_error(L, "Can't set a pointer member to a struct that's about to be freed");
         }
 
         if (check_pointers) {
-            *(void**) to = to_typed_pointer(L, idx, to_usr, tt);
+            u.p = to_typed_pointer(L, idx, to_usr, tt);
         } else {
             ctype_t ct;
-            *(void**) to = to_pointer(L, idx, &ct);
+            u.p = to_pointer(L, idx, &ct);
+        }
+
+#ifndef ALLOW_MISALIGNED_ACCESS
+        if ((uintptr_t) to & PTR_ALIGN_MASK) {
+            memcpy(to, u.c, sizeof(void*));
+        } else
+#endif
+        {
+            *(void**) to = u.p;
         }
 
         lua_pop(L, 1);
@@ -697,7 +713,27 @@ static void set_value(lua_State* L, int idx, void* to, int to_usr, const ctype_t
         val <<= tt->bit_offset;
         *(uint64_t*) to = val | (*(uint64_t*) to & (hi_mask | low_mask));
 
+    } else if (tt->type == STRUCT_TYPE || tt->type == UNION_TYPE) {
+        set_struct(L, idx, to, to_usr, tt, check_pointers);
+
     } else {
+
+#ifndef ALLOW_MISALIGNED_ACCESS
+        union {
+            uint8_t c[8];
+            _Bool b;
+            uint64_t u64;
+            float f;
+            double d;
+            function_t func;
+        } misalign;
+
+        void* origto = to;
+
+        if ((uintptr_t) origto & (tt->base_size - 1)) {
+            to = misalign.c;
+        }
+#endif
 
         switch (tt->type) {
         case BOOL_TYPE:
@@ -739,10 +775,6 @@ static void set_value(lua_State* L, int idx, void* to, int to_usr, const ctype_t
         case ENUM_TYPE:
             *(int32_t*) to = to_enum(L, idx, to_usr, tt);
             break;
-        case STRUCT_TYPE:
-        case UNION_TYPE:
-            set_struct(L, idx, to, to_usr, tt, check_pointers);
-            break;
         case FUNCTION_TYPE:
             *(function_t*) to = to_function(L, idx, to_usr, tt, check_pointers);
             /* note: jitted functions are tied to the lifetime of the lua
@@ -752,6 +784,12 @@ static void set_value(lua_State* L, int idx, void* to, int to_usr, const ctype_t
         default:
             goto err;
         }
+
+#ifndef ALLOW_MISALIGNED_ACCESS
+        if ((uintptr_t) origto & (tt->base_size - 1)) {
+            memcpy(origto, misalign.c, tt->base_size);
+        }
+#endif
     }
 
     assert(lua_gettop(L) == top);
@@ -1026,7 +1064,7 @@ static int cdata_index(lua_State* L)
             ctype_t rt;
             uint64_t val = *(uint64_t*) data;
             val <<= ct.bit_offset;
-            val &= (UINT64_C(2) << ct.bit_size) - 1;
+            val &= (UINT64_C(1) << ct.bit_size) - 1;
 
             memset(&rt, 0, sizeof(rt));
             rt.base_size = 8;
@@ -1039,24 +1077,58 @@ static int cdata_index(lua_State* L)
             return 1;
 
         } else if (ct.type == BOOL_TYPE) {
-            uint8_t val = *(uint8_t*) data;
-            lua_pushboolean(L, val & (2 << ct.bit_offset));
+            uint64_t val = *(uint64_t*) data;
+            lua_pushboolean(L, val & (UINT64_C(1) << ct.bit_offset));
             return 1;
 
         } else {
-            uint32_t val = *(uint32_t*) data;
+            uint64_t val = *(uint64_t*) data;
             val <<= ct.bit_offset;
-            val &= (2 << ct.bit_size) - 1;
+            val &= (UINT64_C(1) << ct.bit_size) - 1;
             lua_pushnumber(L, val);
             return 1;
         }
 
     } else if (ct.pointers) {
+#ifndef ALLOW_MISALIGNED_ACCESS
+        union {
+            uint8_t c[8];
+            void* p;
+        } misalignbuf;
+
+        if ((uintptr_t) data & PTR_ALIGN_MASK) {
+            memcpy(misalignbuf.c, data, sizeof(void*));
+            data = misalignbuf.c;
+        }
+#endif
         to = push_cdata(L, -1, &ct);
         *(void**) to = *(void**) data;
         return 1;
 
+    } else if (ct.type == STRUCT_TYPE || ct.type == UNION_TYPE) {
+        /* push a reference to the member */
+        ct.is_reference = 1;
+        to = push_cdata(L, -1, &ct);
+        *(void**) to = data;
+        return 1;
+
     } else {
+#ifndef ALLOW_MISALIGNED_ACCESS
+        union {
+            uint8_t c[8];
+            double d;
+            float f;
+            uint64_t u64;
+        } misalignbuf;
+
+        assert(ct.base_size <= 8);
+
+        if ((uintptr_t) data & (ct.base_size - 1)) {
+            memcpy(misalignbuf.c, data, ct.base_size);
+            data = misalignbuf.c;
+        }
+#endif
+
         switch (ct.type) {
         case BOOL_TYPE:
             lua_pushboolean(L, *(_Bool*) data);
@@ -1094,13 +1166,6 @@ static int cdata_index(lua_State* L)
             break;
         case DOUBLE_TYPE:
             lua_pushnumber(L, *(double*) data);
-            break;
-        case STRUCT_TYPE:
-        case UNION_TYPE:
-            /* push a reference to the member */
-            ct.is_reference = 1;
-            to = push_cdata(L, -1, &ct);
-            *(void**) to = data;
             break;
         case FUNCTION_TYPE:
             push_function(get_jit(L), L, *(function_t*) data, -1, &ct);
@@ -1394,7 +1459,7 @@ static int cdata_tostring(lua_State* L)
         lua_pushstring(L, buf);
 
     } else if (ct.pointers == 0 && ct.type == UINTPTR_TYPE) {
-        lua_pushfstring(L, "%p", *(int64_t*) p);
+        lua_pushfstring(L, "%p", *(uintptr_t*) p);
 
     } else {
         push_type_name(L, -1, &ct);
@@ -1432,11 +1497,11 @@ static int ffi_number(lua_State* L)
             return 1;
 
         } else if (ct.type == UINT64_TYPE) {
-            lua_pushnumber(L, *(uintptr_t*) data);
+            lua_pushnumber(L, *(uint64_t*) data);
             return 1;
 
         } else if (ct.type == INT64_TYPE) {
-            lua_pushnumber(L, *(uintptr_t*) data);
+            lua_pushnumber(L, *(int64_t*) data);
             return 1;
 
         } else {
@@ -1575,7 +1640,7 @@ static int find_function(lua_State* L, int module, int name, int usr, const ctyp
 
     for (i = 0; i < num; i++) {
         if (libs[i]) {
-            function_t func = (function_t) GetProcAddress(libs[i], funcname);
+            function_t func = (function_t) GetProcAddressA(libs[i], funcname);
 
             if (func) {
                 push_function(jit, L, func, usr, ct);
@@ -1624,7 +1689,7 @@ static int cmodule_index(lua_State* L)
         return 1;
     }
 
-#if defined _WIN32 && !defined _WIN64
+#if defined _WIN32 && !defined _WIN64 && (defined __i386__ || defined _M_IX86)
     ct.calling_convention = STD_CALL;
     lua_pushfstring(L, "_%s@%d", funcname, x86_stack_required(L, -1));
     if (find_function(L, 1, -1, -2, &ct)) {
@@ -1774,7 +1839,7 @@ static int setup_upvals(lua_State* L)
         memset(libs, 0, sz);
 
         /* exe */
-        GetModuleHandleExA(0, NULL, &libs[0]);
+        GetModuleHandle(NULL);
         /* lua dll */
 #ifdef LUA_DLL_NAME
 #define STR2(tok) #tok
@@ -1783,12 +1848,17 @@ static int setup_upvals(lua_State* L)
 #undef STR
 #undef STR2
 #endif
-        /* crt */
-        GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (char*) &_fmode, &libs[2]);
 
-        libs[3] = LoadLibraryA("kernel32.dll");
-        libs[4] = LoadLibraryA("user32.dll");
-        libs[5] = LoadLibraryA("gdi32.dll");
+        /* crt */
+#ifdef UNDER_CE
+        libs[2] = GetModuleHandleA("coredll.dll");
+#else
+        GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (char*) &_fmode, &libs[2]);
+#endif
+
+        libs[3] = GetModuleHandleA("kernel32.dll");
+        libs[4] = GetModuleHandleA("user32.dll");
+        libs[5] = GetModuleHandleA("gdi32.dll");
         jit->lua_dll = libs[1];
         jit->kernel32_dll = libs[3];
 
@@ -1828,7 +1898,7 @@ static int setup_upvals(lua_State* L)
         jit->L = L;
         jit->last_errno = 0;
 
-        dasm_init(jit, 1024);
+        dasm_init(jit, 64);
 #ifdef _WIN32
         {
             SYSTEM_INFO si;
@@ -1840,8 +1910,8 @@ static int setup_upvals(lua_State* L)
 #endif
         jit->pagenum = 0;
         jit->pages = NULL;
-        jit->globals = (void**) malloc(1024 * sizeof(void*));
-        dasm_setupglobal(jit, jit->globals, 1024);
+        jit->globals = (void**) malloc(64 * sizeof(void*));
+        dasm_setupglobal(jit, jit->globals, 64);
         compile_globals(jit, L);
     }
 
@@ -1919,12 +1989,16 @@ static int setup_upvals(lua_State* L)
         lua_setfield(L, ABI_PARAM_UPVAL, "32bit");
 #elif defined __amd64__ || defined _M_X64
         lua_setfield(L, ABI_PARAM_UPVAL, "64bit");
+#elif defined __arm__ || defined __ARM__ || defined ARM || defined __ARM || defined __arm || defined _M_ARM
+        lua_setfield(L, ABI_PARAM_UPVAL, "32bit");
 #else
 #error
 #endif
 
         lua_pushboolean(L, 1);
 #if defined __i386__ || defined _M_IX86 || defined __amd64__ || defined _M_X64
+        lua_setfield(L, ABI_PARAM_UPVAL, "le");
+#elif defined __arm__ || defined __ARM__ || defined ARM || defined __ARM || defined __arm || defined _M_ARM
         lua_setfield(L, ABI_PARAM_UPVAL, "le");
 #else
 #error
@@ -1933,6 +2007,8 @@ static int setup_upvals(lua_State* L)
         lua_pushboolean(L, 1);
 #if defined __i386__ || defined _M_IX86 || defined __amd64__ || defined _M_X64
         lua_setfield(L, ABI_PARAM_UPVAL, "fpu");
+#elif defined __arm__ || defined __ARM__ || defined ARM || defined __ARM || defined __arm || defined _M_ARM
+        lua_setfield(L, ABI_PARAM_UPVAL, "softfp");
 #else
 #error
 #endif
@@ -1949,7 +2025,7 @@ static int setup_upvals(lua_State* L)
 
     /* ffi.os */
     {
-#if defined _WIN32_WCE
+#if defined _WIN32 && defined UNDER_CE
         lua_pushliteral(L, "WindowsCE");
 #elif defined _WIN32
         lua_pushliteral(L, "Windows");
@@ -1974,6 +2050,8 @@ static int setup_upvals(lua_State* L)
         lua_pushliteral(L, "x86");
 #elif defined __amd64__ || defined _M_X64
         lua_pushliteral(L, "x64");
+#elif defined __arm__ || defined __ARM__ || defined ARM || defined __ARM || defined __arm
+        lua_pushliteral(L, "arm");
 #else
 #error
 #endif

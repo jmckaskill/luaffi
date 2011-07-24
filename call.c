@@ -13,6 +13,20 @@ static void push_int(lua_State* L, int val)
 static void push_uint(lua_State* L, unsigned int val)
 { lua_pushnumber(L, val); }
 
+static void push_float(lua_State* L, float val)
+{ lua_pushnumber(L, val); }
+
+static void print(lua_State* L, int** p, size_t sz)
+{
+    size_t i;
+    lua_getglobal(L, "print");
+    lua_pushfstring(L, "%p", p);
+    for (i = 0; i < sz; i++) {
+        lua_pushfstring(L, " %p", p[i]);
+    }
+    lua_concat(L, sz + 1);
+    lua_call(L, 1, 0);
+}
 
 #ifndef _WIN32
 static int GetLastError(void)
@@ -27,13 +41,18 @@ static void SetLastError(int err)
 #define shred(p,s,e) memset((uint8_t*)(p)+(s),0xCC,(e)-(s))
 #endif
 
-#include "dynasm/dasm_x86.h"
 
 #ifdef _WIN64
+#include "dynasm/dasm_x86.h"
 #include "call_x64win.h"
 #elif defined __amd64__
+#include "dynasm/dasm_x86.h"
 #include "call_x64.h"
+#elif defined __arm__ || defined __arm || defined __ARM__ || defined __ARM || defined ARM || defined _ARM_ || defined ARMV4I || defined _M_ARM
+#include "dynasm/dasm_arm.h"
+#include "call_arm.h"
 #else
+#include "dynasm/dasm_x86.h"
 #include "call_x86.h"
 #endif
 
@@ -53,7 +72,9 @@ static function_t compile(jit_t* jit, lua_State* L, function_t func, int ref)
 
     dasm_checkstep(jit, -1);
     if ((err = dasm_link(jit, &codesz)) != 0) {
-        luaL_error(L, "dasm_link error %d", err);
+        char buf[32];
+        sprintf(buf, "%x", err);
+        luaL_error(L, "dasm_link error %s", buf);
     }
 
     codesz += sizeof(jit_header_t);
@@ -63,8 +84,10 @@ static function_t compile(jit_t* jit, lua_State* L, function_t func, int ref)
     compile_extern_jump(jit, L, func, code->jump);
 
     if ((err = dasm_encode(jit, code+1)) != 0) {
+        char buf[32];
+        sprintf(buf, "%x", err);
         commit_code(jit, code, 0);
-        luaL_error(L, "dasm_encode error %d", err);
+        luaL_error(L, "dasm_encode error %s", buf);
     }
 
     commit_code(jit, code, codesz);
@@ -87,12 +110,15 @@ int get_extern(jit_t* jit, uint8_t* addr, int idx, int type)
        jmp = jumps[idx]; 
     }
 
-    addr += 4; /* compensate for room taken up for the offset so that we can work rip relative */
+    /* compensate for room taken up for the offset so that we can work rip
+     * relative */
+    addr += BRANCH_OFF;
 
-    /* see if we can fit the offset in a 32bit displacement, if not use the jump instruction */
+    /* see if we can fit the offset in the branch displacement, if not use the
+     * jump instruction */
     off = *(uint8_t**) jmp - addr;
 
-    if (INT32_MIN <= off && off <= INT32_MAX) {
+    if (MIN_BRANCH <= off && off <= MAX_BRANCH) {
         return (int32_t) off;
     } else {
         return (int32_t)(jmp + sizeof(uint8_t*) - addr);
@@ -125,12 +151,14 @@ static void* reserve_code(jit_t* jit, lua_State* L, size_t sz)
 
 #define ADDFUNC(DLL, NAME) \
         lua_pushliteral(L, #NAME); \
-        func = DLL ? (function_t) GetProcAddress(DLL, #NAME) : NULL; \
+        func = DLL ? (function_t) GetProcAddressA(DLL, #NAME) : NULL; \
         func = func ? func : (function_t) &NAME; \
         lua_pushcfunction(L, (lua_CFunction) func); \
         lua_rawset(L, -3)
 
+        ADDFUNC(NULL, print);
         ADDFUNC(NULL, to_double);
+        ADDFUNC(NULL, to_float);
         ADDFUNC(NULL, to_uint64);
         ADDFUNC(NULL, to_int64);
         ADDFUNC(NULL, to_int32);
@@ -147,6 +175,7 @@ static void* reserve_code(jit_t* jit, lua_State* L, size_t sz)
         ADDFUNC(NULL, push_cdata);
         ADDFUNC(NULL, push_int);
         ADDFUNC(NULL, push_uint);
+        ADDFUNC(NULL, push_float);
         ADDFUNC(jit->kernel32_dll, SetLastError);
         ADDFUNC(jit->kernel32_dll, GetLastError);
         ADDFUNC(jit->lua_dll, luaL_error);
@@ -155,7 +184,7 @@ static void* reserve_code(jit_t* jit, lua_State* L, size_t sz)
         ADDFUNC(jit->lua_dll, lua_gettop);
         ADDFUNC(jit->lua_dll, lua_rawgeti);
         ADDFUNC(jit->lua_dll, lua_pushnil);
-        ADDFUNC(jit->lua_dll, lua_call);
+        ADDFUNC(jit->lua_dll, lua_callk);
         ADDFUNC(jit->lua_dll, lua_settop);
         ADDFUNC(jit->lua_dll, lua_remove);
 #undef ADDFUNC
@@ -197,13 +226,13 @@ static void commit_code(jit_t* jit, void* code, size_t sz)
     page_t* page = jit->pages[jit->pagenum-1];
     page->off += sz;
     EnableExecute(page, page->size);
-#if 0
     {
-        FILE* out = fopen("out.bin", "wb");
+#if 0
+        FILE* out = fopen("\\Hard Disk\\out.bin", "wb");
         fwrite(page, page->off, 1, out);
         fclose(out);
-    }
 #endif
+    }
 }
 
 void free_code(jit_t* jit, lua_State* L, function_t func)

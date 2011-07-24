@@ -23,11 +23,10 @@
 #ifndef STDINT_H
 #define STDINT_H
 
-#ifndef _MSC_VER
-#include_next <stdint.h>
-#else
-
+#ifndef UNDER_CE
 #include <crtdefs.h>
+#endif
+
 #include <limits.h>
 
 //  These are fairly safe guesses for some 16-bit, and most 32-bit and 64-bit
@@ -164,9 +163,12 @@ BOOST_HAS_STDINT_H is defined (John Maddock).
 #  define UINT64_MAX        UINT64_C(18446744073709551615)
 #endif
 
+#ifdef UNDER_CE
+typedef unsigned long uintptr_t;
+typedef long intptr_t;
+#endif
 
 
-#endif // !defined _MSC_VER 
 
 #endif // BOOST_CSTDINT_HPP
 

@@ -344,8 +344,10 @@ static int calculate_member_position(lua_State* L, parser_t* P, int is_named, ct
         }
 
         if (0 < mt->bit_size && mt->bit_size <= bits_left) {
-            /* use the current storage unit */
-            mt->offset = ALIGN_DOWN(ct->base_size, palign);
+            /* Use the current storage unit.  Use the nearest u64 boundary as
+             * the offset, this means the set/get code does not have to deal
+             * with misaligned access */
+            mt->offset = ALIGN_DOWN(ct->base_size, 7);
             mt->bit_offset = bit_offset + (ct->base_size - mt->offset) * CHAR_BIT;
             bit_offset += mt->bit_size;
             bits_left -= mt->bit_size;
@@ -364,8 +366,8 @@ static int calculate_member_position(lua_State* L, parser_t* P, int is_named, ct
             if (mt->bit_size) {
                 /* start a new storage unit */
                 ct->base_size = ALIGN_UP(ct->base_size, palign);
-                mt->offset = ct->base_size;
-                mt->bit_offset = 0;
+                mt->offset = ALIGN_DOWN(ct->base_size, 7);
+                mt->bit_offset = (ct->base_size - mt->offset) * CHAR_BIT;
                 bit_offset = mt->bit_size;
                 bits_left = base_bits - mt->bit_size;
 #ifndef _WIN32

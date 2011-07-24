@@ -9,6 +9,11 @@ if ffi.arch == 'x86' and ffi.os == 'Windows' then
     dlls.__fastcall = ffi.load('test_fastcall')
 end
 
+local function check(a, b)
+    --print('check', a, b)
+    return _G.assert(a == b)
+end
+
 print('Running test')
 
 ffi.cdef [[
@@ -158,22 +163,22 @@ local buf = ffi.new('char[256]')
 
 local function checkbuf(type, suffix, ret)
     local str = tostring(test_values[type]):gsub('^cdata%b<>: ', '')
-    assert(ffi.string(buf) == str and ret == #str)
+    check(ffi.string(buf), str)
+    check(ret, #str)
 end
 
 local first = true
 
 for convention,c in pairs(dlls) do
-    assert(c.add_i8(1,1) == 2)
-    assert(c.add_i8(256,1) == 1)
-    assert(c.add_i8(127,1) == -128)
-    assert(c.add_i8(-120,120) == 0)
-    assert(c.add_u8(255,1) == 0)
-    assert(c.add_u8(120,120) == 240)
-    assert(c.add_u8(-1,0) == 255)
-    assert(c.add_i16(2000,4000) == 6000)
-    assert(c.add_d(20, 12) == 32)
-    assert(c.add_f(40, 32) == 72)
+    check(c.add_i8(1,1), 2)
+    check(c.add_i8(256,1), 1)
+    check(c.add_i8(127,1), -128)
+    check(c.add_i8(-120,120), 0)
+    check(c.add_u8(255,1), 0)
+    check(c.add_u8(120,120), 240)
+    check(c.add_i16(2000,4000), 6000)
+    check(c.add_d(20, 12), 32)
+    check(c.add_f(40, 32), 72)
 
     for suffix, type in pairs{d = 'double', f = 'float', u64 = 'uint64_t', u32 = 'uint32_t', u16 = 'uint16_t', s = 'const char*', p = 'void*'} do
         local test = test_values[type]
@@ -198,22 +203,22 @@ for convention,c in pairs(dlls) do
 
     local psz = ffi.new('size_t[1]')
     local palign = ffi.new('size_t[1]')
-    local function check(type, test, ret)
-        assert(ret == #test)
-        assert(test == ffi.string(buf))
-        assert(tonumber(psz[0]) == ffi.sizeof(type))
-        assert(tonumber(palign[0]) == ffi.alignof(type))
+    local function check_align(type, test, ret)
+        check(ret, #test)
+        check(test, ffi.string(buf))
+        check(tonumber(psz[0]), ffi.sizeof(type))
+        check(tonumber(palign[0]), ffi.alignof(type))
     end
 
-    check('struct Date', '1 2 3 4', c.print_date(psz, palign, buf, {1,2,3,4}))
-    check('struct Date2', '1 2 3 4', c.print_date2(psz, palign, buf, {1,2,3,4}))
-    check('struct sysv1', '1 2 3', c.print_sysv1(psz, palign, buf, {1,2,3}))
-    check('struct sysv2', '1 2 3 4 5 6', c.print_sysv2(psz, palign, buf, {1,2,3,4,5,6}))
-    check('struct sysv3', '1 2', c.print_sysv3(psz, palign, buf, {1,2}))
-    check('union sysv4', '1', c.print_sysv4(psz, palign, buf, {1}))
-    check('struct sysv5', '1 2 3', c.print_sysv5(psz, palign, buf, {1,2,3}))
-    check('struct sysv6', '1 2 3', c.print_sysv6(psz, palign, buf, {1,2,3}))
-    check('struct sysv7', '1 2 3 4 5', c.print_sysv7(psz, palign, buf, {1,2,3,4,5}))
+    check_align('struct Date', '1 2 3 4', c.print_date(psz, palign, buf, {1,2,3,4}))
+    check_align('struct Date2', '1 2 3 4', c.print_date2(psz, palign, buf, {1,2,3,4}))
+    check_align('struct sysv1', '1 2 3', c.print_sysv1(psz, palign, buf, {1,2,3}))
+    check_align('struct sysv2', '1 2 3 4 5 6', c.print_sysv2(psz, palign, buf, {1,2,3,4,5,6}))
+    check_align('struct sysv3', '1 2', c.print_sysv3(psz, palign, buf, {1,2}))
+    check_align('union sysv4', '1', c.print_sysv4(psz, palign, buf, {1}))
+    check_align('struct sysv5', '1 2 3', c.print_sysv5(psz, palign, buf, {1,2,3}))
+    check_align('struct sysv6', '1 2 3', c.print_sysv6(psz, palign, buf, {1,2,3}))
+    check_align('struct sysv7', '1 2 3 4 5', c.print_sysv7(psz, palign, buf, {1,2,3,4,5}))
     
     local cbs = [[
     int call_i(int (*__cdecl func)(int), int arg);
@@ -225,26 +230,28 @@ for convention,c in pairs(dlls) do
     ffi.cdef(cbs:gsub('__cdecl', convention))
 
     local u3 = ffi.new('uint64_t', 3)
-    assert(c.call_i(function(a) return 2*a end, 3) == 6)
+    check(c.call_i(function(a) return 2*a end, 3), 6)
     assert(math.abs(c.call_d(function(a) return 2*a end, 3.2) - 6.4) < 0.0000000001)
     assert(math.abs(c.call_f(function(a) return 2*a end, 3.2) - 6.4) < 0.000001)
-    assert(ffi.string(c.call_s(function(s) return s + u3 end, 'foobar')) == 'bar')
+    check(ffi.string(c.call_s(function(s) return s + u3 end, 'foobar')), 'bar')
 
     local fp = ffi.new('struct fptr')
     fp.p = function(a) return 2*a end
-    assert(c.call_fptr(fp, 4) == 8)
+    check(c.call_fptr(fp, 4), 8)
 
-    assert(c.call_fptr({function(a) return 3*a end}, 5) == 15)
+    check(c.call_fptr({function(a) return 3*a end}, 5), 15)
 
     local suc, err = pcall(c.call_s, function(s) error(ffi.string(s), 0) end, 'my error')
-    assert(not suc)
-    assert(err == 'my error')
+    check(suc, false)
+    check(err, 'my error')
 
-    assert(ffi.errno() == c.get_errno())
+    check(ffi.errno(), c.get_errno())
     c.set_errno(3)
-    assert(ffi.errno() == 3 and c.get_errno() == 3)
-    assert(ffi.errno(4) == 3)
-    assert(ffi.errno() == 4 and c.get_errno() == 4)
+    check(ffi.errno(), 3)
+    check(c.get_errno(), 3)
+    check(ffi.errno(4), 3)
+    check(ffi.errno(), 4)
+    check(c.get_errno(), 4)
 
     first = false
 end

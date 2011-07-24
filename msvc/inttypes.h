@@ -1,9 +1,5 @@
 #pragma once
 
-#ifndef _MSC_VER
-#include_next <inttypes.h>
-#else
-
 /* Signed integers */
 #define PRId8   "d"
 #define PRId16  "d"
@@ -33,4 +29,3 @@
 #define PRIX64  "I64X"
 #define PRIxPTR PRIx32
 #define PRIXPTR PRIX32
-#endif
