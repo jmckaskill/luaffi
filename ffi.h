@@ -97,18 +97,7 @@ static void luaL_setfuncs (lua_State *L, const luaL_Reg *l, int nup) {
             return NULL;
           }
         }
-        static void* DoGetModuleHandleA(const char* name) {
-          wchar_t buf[MAX_PATH];
-          int sz = MultiByteToWideChar(CP_UTF8, 0, name, -1, buf, 512);
-          if (sz > 0) {
-            buf[sz] = 0;
-            return GetModuleHandleW(buf);
-          } else {
-            return NULL;
-          }
-        }
 #       define LoadLibraryA DoLoadLibraryA
-#       define GetModuleHandleA DoGetModuleHandleA
 #   else
 #       define GetProcAddressA GetProcAddress
 #   endif

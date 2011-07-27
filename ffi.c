@@ -1851,14 +1851,14 @@ static int setup_upvals(lua_State* L)
 
         /* crt */
 #ifdef UNDER_CE
-        libs[2] = GetModuleHandleA("coredll.dll");
+        libs[2] = DoLoadLibraryA("coredll.dll");
 #else
         GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (char*) &_fmode, &libs[2]);
+        libs[3] = DoLoadLibraryA("kernel32.dll");
+        libs[4] = DoLoadLibraryA("user32.dll");
+        libs[5] = DoLoadLibraryA("gdi32.dll");
 #endif
 
-        libs[3] = GetModuleHandleA("kernel32.dll");
-        libs[4] = GetModuleHandleA("user32.dll");
-        libs[5] = GetModuleHandleA("gdi32.dll");
         jit->lua_dll = libs[1];
         jit->kernel32_dll = libs[3];
 
