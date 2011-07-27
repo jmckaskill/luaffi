@@ -899,7 +899,8 @@ int parse_type(lua_State* L, parser_t* P, ctype_t* ct)
         /* lookup type */
         lua_rawget(L, TYPE_UPVAL);
         if (lua_isnil(L, -1)) {
-            return luaL_error(L, "unknown type %.*s on line %d", (int) tok.size, tok.str, P->line);
+            lua_pushlstring(L, tok.str, tok.size);
+            return luaL_error(L, "unknown type %s on line %d", lua_tostring(L, -1), P->line);
         }
 
         *ct = *(const ctype_t*) lua_touserdata(L, -1);
@@ -1572,7 +1573,8 @@ static int64_t calculate_constant1(lua_State* L, parser_t* P, token_t* tok)
         lua_rawget(L, CONSTANTS_UPVAL);
 
         if (!lua_isnumber(L, -1)) {
-            luaL_error(L, "use of undefined constant %.*s on line %d", (int) tok->size, tok->str, P->line);
+            lua_pushlstring(L, tok->str, tok->size);
+            luaL_error(L, "use of undefined constant %s on line %d", lua_tostring(L, -1), P->line);
         }
 
         ret = (int64_t) lua_tonumber(L, -1);
