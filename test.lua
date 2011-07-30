@@ -204,6 +204,7 @@ for convention,c in pairs(dlls) do
     local psz = ffi.new('size_t[1]')
     local palign = ffi.new('size_t[1]')
     local function check_align(type, test, ret)
+        --print(type, test, ret, ffi.string(buf))
         check(ret, #test)
         check(test, ffi.string(buf))
         check(tonumber(psz[0]), ffi.sizeof(type))

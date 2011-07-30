@@ -83,6 +83,32 @@ static void luaL_setfuncs (lua_State *L, const luaL_Reg *l, int nup) {
 #define lua_rawlen lua_objlen
 #endif
 
+/* architectures */
+#if defined _WIN32 && defined UNDER_CE
+# define OS_CE
+#elif defined _WIN32
+# define OS_WIN
+#elif defined __APPLE__ && defined __MACH__
+# define OS_OSX
+#elif defined __linux__
+# define OS_LINUX
+#elif defined __FreeBSD__ || defined __OpenBSD__ || defined __NetBSD__
+# define OS_BSD
+#elif defined unix || defined __unix__ || defined __unix || defined _POSIX_VERSION || defined _XOPEN_VERSION
+# define OS_POSIX
+#endif
+
+/* architecture */
+#if defined __i386__ || defined _M_IX86
+# define ARCH_X86
+#elif defined __amd64__ || defined _M_X64
+# define ARCH_X64
+#elif defined __arm__ || defined __ARM__ || defined ARM || defined __ARM || defined __arm
+# define ARCH_ARM
+#else
+# error
+#endif
+
 
 #ifdef _WIN32
 
@@ -113,13 +139,13 @@ static void luaL_setfuncs (lua_State *L, const luaL_Reg *l, int nup) {
 #   define LIB_FORMAT_2 "lib%s.so"
 #   define LoadLibraryA(name) dlopen(name, RTLD_NOW | RTLD_GLOBAL)
 #   define GetProcAddressA(lib, name) dlsym(lib, name)
-#   define AllocPage(size) mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0)
+#   define AllocPage(size) mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANON, -1, 0)
 #   define FreePage(data, size) munmap(data, size)
 #   define EnableExecute(data, size) mprotect(data, size, PROT_READ|PROT_EXEC)
 #   define EnableWrite(data, size) mprotect(data, size, PROT_READ|PROT_WRITE)
 #endif
 
-#if defined _M_IX86 || defined _M_X64 || defined __amd64__ || defined __i386__
+#if defined ARCH_X86 || defined ARCH_X64
 #define ALLOW_MISALIGNED_ACCESS
 #endif
 
@@ -153,7 +179,6 @@ struct jit_t {
   (((uintptr_t) (PTR)) & (~ ((uintptr_t) (MASK)) ))
 #define ALIGN_UP(PTR, MASK) \
   (( ((uintptr_t) (PTR)) + ((uintptr_t) (MASK)) ) & (~ ((uintptr_t) (MASK)) ))
-
 
 /* cdata_t/ctype_t */
 
@@ -242,7 +267,7 @@ enum {
 typedef struct ctype_t {
     union {
         /* size of bitfield in bits - valid if is_bitfield */
-        int bit_size;
+        size_t bit_size;
         /* size of the base type in bytes - valid if !is_bitfield */
         size_t base_size;
     };

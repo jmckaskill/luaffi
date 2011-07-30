@@ -1,5 +1,4 @@
 #include "ffi.h"
-#include <malloc.h>
 #include <math.h>
 #include <inttypes.h>
 
@@ -263,7 +262,7 @@ int32_t to_enum(lua_State* L, int idx, int to_usr, const ctype_t* to_ct)
             goto err;
         }
 
-        ret = lua_tointeger(L, -1);
+        ret = (int32_t) lua_tointeger(L, -1);
         lua_pop(L, 1);
         return ret;
 
@@ -1078,7 +1077,7 @@ static int cdata_index(lua_State* L)
 
         } else if (ct.type == BOOL_TYPE) {
             uint64_t val = *(uint64_t*) data;
-            lua_pushboolean(L, val & (UINT64_C(1) << ct.bit_offset));
+            lua_pushboolean(L, (int) (val & (UINT64_C(1) << ct.bit_offset)));
             return 1;
 
         } else {
@@ -1575,7 +1574,7 @@ static int ffi_fill(lua_State* L)
     int val = 0;
 
     if (!lua_isnoneornil(L, 3)) {
-        val = luaL_checkinteger(L, 3);
+        val = (int) luaL_checkinteger(L, 3);
     }
 
     memset(to, val, sz);
@@ -1934,7 +1933,7 @@ static int setup_upvals(lua_State* L)
         lua_setfield(L, CONSTANTS_UPVAL, "NULL");
         lua_pop(L, 1);
 
-#define ALIGNOF(S) ((char*) &S.v - (char*) &S - 1)
+#define ALIGNOF(S) ((int) ((char*) &S.v - (char*) &S - 1))
 
         /* add the rest of the builtin types */
         push_builtin(L, &ct, "bool", BOOL_TYPE, sizeof(_Bool), sizeof(_Bool) -1);
@@ -1985,29 +1984,25 @@ static int setup_upvals(lua_State* L)
     /* setup ABI params table */
     {
         lua_pushboolean(L, 1);
-#if defined __i386__ || defined _M_IX86
+#if defined ARCH_X86 || defined ARCH_ARM
         lua_setfield(L, ABI_PARAM_UPVAL, "32bit");
-#elif defined __amd64__ || defined _M_X64
+#elif defined ARCH_X64
         lua_setfield(L, ABI_PARAM_UPVAL, "64bit");
-#elif defined __arm__ || defined __ARM__ || defined ARM || defined __ARM || defined __arm || defined _M_ARM
-        lua_setfield(L, ABI_PARAM_UPVAL, "32bit");
 #else
 #error
 #endif
 
         lua_pushboolean(L, 1);
-#if defined __i386__ || defined _M_IX86 || defined __amd64__ || defined _M_X64
-        lua_setfield(L, ABI_PARAM_UPVAL, "le");
-#elif defined __arm__ || defined __ARM__ || defined ARM || defined __ARM || defined __arm || defined _M_ARM
+#if defined ARCH_X86 || defined ARCH_X64 || defined ARCH_ARM
         lua_setfield(L, ABI_PARAM_UPVAL, "le");
 #else
 #error
 #endif
 
         lua_pushboolean(L, 1);
-#if defined __i386__ || defined _M_IX86 || defined __amd64__ || defined _M_X64
+#if defined ARCH_X86 || defined ARCH_X64
         lua_setfield(L, ABI_PARAM_UPVAL, "fpu");
-#elif defined __arm__ || defined __ARM__ || defined ARM || defined __ARM || defined __arm || defined _M_ARM
+#elif defined ARCH_ARM
         lua_setfield(L, ABI_PARAM_UPVAL, "softfp");
 #else
 #error
@@ -2025,17 +2020,17 @@ static int setup_upvals(lua_State* L)
 
     /* ffi.os */
     {
-#if defined _WIN32 && defined UNDER_CE
+#if defined OS_CE
         lua_pushliteral(L, "WindowsCE");
-#elif defined _WIN32
+#elif defined OS_WIN
         lua_pushliteral(L, "Windows");
-#elif defined __APPLE__ && defined __MACH__
+#elif defined OS_OSX
         lua_pushliteral(L, "OSX");
-#elif defined __linux__
+#elif defined OS_LINUX
         lua_pushliteral(L, "Linux");
-#elif defined __FreeBSD__ || defined __OpenBSD__ || defined __NetBSD__
+#elif defined OS_BSD
         lua_pushliteral(L, "BSD");
-#elif defined unix || defined __unix__ || defined __unix || defined _POSIX_VERSION || defined _XOPEN_VERSION
+#elif defined OS_POSIX
         lua_pushliteral(L, "POSIX");
 #else
         lua_pushliteral(L, "Other");
@@ -2046,14 +2041,14 @@ static int setup_upvals(lua_State* L)
 
     /* ffi.arch */
     {
-#if defined __i386__ || defined _M_IX86
+#if defined ARCH_X86
         lua_pushliteral(L, "x86");
-#elif defined __amd64__ || defined _M_X64
+#elif defined ARCH_X64
         lua_pushliteral(L, "x64");
-#elif defined __arm__ || defined __ARM__ || defined ARM || defined __ARM || defined __arm
+#elif defined ARCH_ARM
         lua_pushliteral(L, "arm");
 #else
-#error
+# error
 #endif
         lua_setfield(L, 1, "arch");
     }

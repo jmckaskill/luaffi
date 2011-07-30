@@ -325,6 +325,15 @@ static int calculate_member_position(lua_State* L, parser_t* P, int is_named, ct
     } else if (mt->is_bitfield) {
         int base_bits = (mt->align_mask + 1) * CHAR_BIT;
 
+#ifdef OS_OSX
+        /* OSX uses int containers for char and short bitfields, but doesn't
+         * change the member alignment */
+        if (base_bits < sizeof(int) * CHAR_BIT) {
+            base_bits = sizeof(int) * CHAR_BIT;
+            malign = sizeof(int) - 1;
+        }
+#endif
+
 #ifdef _WIN32
         /* MSVC uses a separate storage unit for each size */
         if (bit_offset + bits_left != base_bits) {
@@ -336,14 +345,14 @@ static int calculate_member_position(lua_State* L, parser_t* P, int is_named, ct
          * out the number of bits left by finding how many bits
          * from the current offset to the next alignment boundary.
          */
-        bits_left = (ALIGN_UP(ct->base_size + 1, malign) - ct->base_size) * CHAR_BIT - bit_offset;
+        bits_left = (int) ((ALIGN_UP(ct->base_size + 1, malign) - ct->base_size) * CHAR_BIT) - bit_offset;
 #endif
 
         if (is_named && mt->bit_size == 0) {
             luaL_error(L, "zero length bitfields must be unnamed on line %d", P->line);
         }
 
-        if (0 < mt->bit_size && mt->bit_size <= bits_left) {
+        if (0 < mt->bit_size && (int) mt->bit_size <= bits_left) {
             /* Use the current storage unit.  Use the nearest u64 boundary as
              * the offset, this means the set/get code does not have to deal
              * with misaligned access */
@@ -1342,7 +1351,7 @@ const char* parse_argument(lua_State* L, parser_t* P, int ct_usr, ctype_t* type,
             }
 
             type->is_bitfield = 1;
-            type->bit_size = (unsigned int) bsize;
+            type->bit_size = (size_t) bsize;
             break;
            
         } else if (tok.type != TOK_TOKEN) {
@@ -1472,12 +1481,12 @@ static int parse_root(lua_State* L, parser_t* P)
                     luaL_error(L, "pack directive with invalid pack size on line %d", P->line);
                 }
 
-                P->align_mask = (size_t) (tok.integer - 1);
+                P->align_mask = (int) (tok.integer - 1);
                 check_token(L, P, TOK_CLOSE_PAREN, "", "invalid pack directive on line %d", P->line);
 
             } else if (tok.type == TOK_TOKEN && IS_LITERAL(tok, "push")) {
                 int line = P->line;
-                size_t previous_alignment = P->align_mask;
+                int previous_alignment = P->align_mask;
 
                 check_token(L, P, TOK_CLOSE_PAREN, "", "invalid pack directive on line %d", P->line);
 

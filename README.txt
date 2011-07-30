@@ -20,9 +20,7 @@ Currently supported:
 - windows x86/x64
 - linux x86/x64
 - windows CE ARM little endian (ARMv4+)
-
-OSX support is almost done, but I currently have no way of building and/or
-testing it.
+- OSX x86/x64
 
 Currently only dll builds are supported (ie no static).
 
@@ -51,6 +49,7 @@ On posix use make. Available targets are:
 - debug: debug build
 - test: build and run the test build
 - clean: cleanup object files
+- macosx: release build for Mac OSX
 
 Edit the Makefile if your lua exe differs from `lua5.1` or if you can't get
 the include and lib arguments from pkg-config.

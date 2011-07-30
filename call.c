@@ -24,7 +24,7 @@ static void print(lua_State* L, int** p, size_t sz)
     for (i = 0; i < sz; i++) {
         lua_pushfstring(L, " %p", p[i]);
     }
-    lua_concat(L, sz + 1);
+    lua_concat(L, (int) sz + 1);
     lua_call(L, 1, 0);
 }
 
