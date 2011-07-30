@@ -44,7 +44,7 @@ static char tok3[][4] = {
 };
 
 static char tok2[][3] = {
-    ">>", "<<", "&&", "||", "<=",
+    "<<", ">>", "&&", "||", "<=",
     ">=", "==", "!=",
     /* unused "+=", "-=", "*=", "/=", "%=", "&=", "^=", "|=", "++", "--", "->", "::", */
 };
@@ -1510,6 +1510,28 @@ static int parse_root(lua_State* L, parser_t* P)
 
         } else if (IS_LITERAL(tok, "typedef")) {
             parse_typedef(L, P);
+
+        } else if (IS_LITERAL(tok, "static")) {
+            int64_t val;
+            check_token(L, P, TOK_TOKEN, "const", "expected 'static const int' on line %d", P->line);
+            check_token(L, P, TOK_TOKEN, "int", "expected 'static const int' on line %d", P->line);
+
+            require_token(L, P, &tok);
+            if (tok.type != TOK_TOKEN) {
+                luaL_error(L, "expected constant name after 'static const int' on line %d", P->line);
+            }
+
+            lua_pushlstring(L, tok.str, tok.size);
+
+            check_token(L, P, TOK_ASSIGN, "", "expected = after 'static const int <name>' on line %d", P->line);
+
+            val = calculate_constant(L, P);
+
+            check_token(L, P, TOK_SEMICOLON, "", "expected ; after 'static const int' definition on line %d", P->line);
+
+            lua_pushnumber(L, (int) val);
+            lua_rawset(L, CONSTANTS_UPVAL);
+
 
         } else {
             /* type declaration, type definition, or function declaration */
