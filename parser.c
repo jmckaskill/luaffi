@@ -1329,6 +1329,10 @@ const char* parse_argument(lua_State* L, parser_t* P, int ct_usr, ctype_t* type,
             if (tok.type == TOK_QUESTION) {
                 type->is_variable_array = 1;
                 type->variable_increment = (type->pointers > 1) ? sizeof(void*) : type->base_size;
+                check_token(L, P, TOK_CLOSE_SQUARE, "", "invalid character in array on line %d", P->line);
+
+            } else if (tok.type == TOK_CLOSE_SQUARE) {
+                type->array_size = 0;
 
             } else {
                 int64_t asize;
@@ -1338,9 +1342,9 @@ const char* parse_argument(lua_State* L, parser_t* P, int ct_usr, ctype_t* type,
                     luaL_error(L, "array size can not be negative on line %d", P->line);
                 }
                 type->array_size = (size_t) asize;
+                check_token(L, P, TOK_CLOSE_SQUARE, "", "invalid character in array on line %d", P->line);
             }
 
-            check_token(L, P, TOK_CLOSE_SQUARE, "", "invalid character in array on line %d", P->line);
             break;
            
         } else if (tok.type == TOK_COLON) {
