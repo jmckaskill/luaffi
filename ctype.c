@@ -1,3 +1,6 @@
+/* vim: ts=4 sw=4 sts=4 et tw=78
+ * Copyright (c) 2011 James R. McKaskill. See license in ffi.h
+ */
 #include "ffi.h"
 
 static int to_define_key;

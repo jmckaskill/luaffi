@@ -8,7 +8,8 @@ into lua source as a string.
 
 License
 -------
-MIT same as Lua 5.1
+Copyright (c) 2011 James R. McKaskill.
+MIT same as Lua 5.1. See full license text in ffi.h.
 
 Source
 ------
