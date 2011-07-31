@@ -106,11 +106,11 @@ int get_extern(jit_t* jit, uint8_t* addr, int idx, int type)
     jit_header_t* h = (jit_header_t*) ((uint8_t*) page + page->off);
     uint8_t* jmp;
     ptrdiff_t off;
-   
+
     if (idx == jit->function_extern) {
        jmp = h->jump;
     } else {
-       jmp = jumps[idx]; 
+       jmp = jumps[idx];
     }
 
     /* compensate for room taken up for the offset so that we can work rip

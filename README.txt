@@ -105,7 +105,7 @@ with the function pointer cdata as the first upvalue. The actual code is JITed
 using dynasm (see call_x86.dasc). The JITed code does the following in order:
 1. Calls the needed unpack functions in ffi.c placing each argument on the HW stack
 2. Updates errno
-3. Performs the c call 
+3. Performs the c call
 4. Retrieves errno
 5. Pushes the result back into lua from the HW register or stack
 

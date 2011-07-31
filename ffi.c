@@ -359,7 +359,7 @@ void* to_typed_pointer(lua_State* L, int idx, int to_usr, const ctype_t* tt)
         set_struct(L, idx, p, to_usr, &ct, 1);
         return p;
     }
-   
+
     p = to_pointer(L, idx, &ft);
 
     if (is_void_ptr(tt)) {
@@ -469,7 +469,7 @@ err:
 
 function_t to_typed_function(lua_State* L, int idx, int to_usr, const ctype_t* tt)
 { return to_function(L, idx, to_usr, tt, 1); }
-   
+
 static void set_value(lua_State* L, int idx, void* to, int to_usr, const ctype_t* tt, int check_pointers);
 
 static void set_array(lua_State* L, int idx, void* to, int to_usr, const ctype_t* tt, int check_pointers)
@@ -1359,7 +1359,7 @@ static int cdata_pow(lua_State* L)
 { NUMBER_ONLY_BINOP(POW); }
 
 static int cdata_unm(lua_State* L)
-{ 
+{
     ctype_t ct;
     void* to;
     int64_t val = to_intptr(L, 1, &ct);

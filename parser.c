@@ -166,7 +166,7 @@ static int next_token(lua_State* L, parser_t* P, token_t* tok)
         tok->str = s;
 
         while (*s != tok->str[0]) {
-            
+
             if (*s == '\0' || (*s == '\\' && *(s+1) == '\0')) {
                 return luaL_error(L, "string not finished");
             }
@@ -283,7 +283,7 @@ static int parse_enum(lua_State* L, parser_t* P, ctype_t* type)
         /* add the enum value to the enum usr value table */
         lua_pushnumber(L, value);
         lua_rawset(L, ct_usr);
-        
+
         if (tok.type == TOK_CLOSE_CURLY) {
             break;
         } else if (tok.type != TOK_COMMA) {
@@ -410,7 +410,7 @@ static int calculate_member_position(lua_State* L, parser_t* P, int is_named, ct
          */
         bits_left = CHAR_BIT - 1;
 #endif
-        
+
     } else {
 
         /* finish up the current bitfield storage unit */
@@ -677,7 +677,7 @@ static int parse_record(lua_State* L, parser_t* P, ctype_t* ct)
 
         assert(lua_gettop(L) == top + 1 && lua_istable(L, -1));
 
-        /* if a name is given then we may be at the end of the string 
+        /* if a name is given then we may be at the end of the string
          * eg for ffi.new('struct foo')
          */
         if (!next_token(L, P, &tok)) {
@@ -798,7 +798,7 @@ static int parse_type_name(lua_State* L, parser_t* P)
         } else {
             lua_pushstring(L, (((char) -1) > 0) ? "uint8_t" : "int8_t");
         }
-    
+
     } else if (flags & INT32) {
         if (flags & UNSIGNED) {
             lua_pushliteral(L, "uint32_t");
@@ -818,7 +818,7 @@ static int parse_type_name(lua_State* L, parser_t* P)
 
     } else if (flags & FLOAT) {
         lua_pushliteral(L, "float");
-    
+
     } else if (flags & LONG_LONG) {
         if (flags & UNSIGNED) {
             lua_pushliteral(L, "uint64_t");
@@ -862,7 +862,7 @@ static int parse_type_name(lua_State* L, parser_t* P)
 
 /* parses out the base type of a type expression in a function declaration,
  * struct definition, typedef etc
- * 
+ *
  * leaves the usr value of the type on the stack
  */
 int parse_type(lua_State* L, parser_t* P, ctype_t* ct)
@@ -1093,7 +1093,7 @@ static void parse_function_arguments(lua_State* L, parser_t* P, ctype_t* ftype, 
     int func_usr;
 
     ret_usr = lua_absindex(L, ret_usr);
-   
+
     /* user table for the function type, at the end we look up the type and if
      * we find another usr table that matches exactly, we dump this one and
      * use that instead
@@ -1116,7 +1116,7 @@ static void parse_function_arguments(lua_State* L, parser_t* P, ctype_t* ftype, 
         if (tok.type == TOK_CLOSE_PAREN) {
             break;
         }
-        
+
         if (arg_idx > 1) {
             if (tok.type == TOK_COMMA) {
                 require_token(L, P, &tok);
@@ -1220,7 +1220,7 @@ static int max_bitfield_size(int type)
  * const, this parses the "* bar[3]" and updates the type argument
  *
  * ct_usr and type must be as filled out by parse_type
- * 
+ *
  * pushes the updated user value on the top of the stack
  */
 const char* parse_argument(lua_State* L, parser_t* P, int ct_usr, ctype_t* type, size_t* namesz)
@@ -1349,7 +1349,7 @@ const char* parse_argument(lua_State* L, parser_t* P, int ct_usr, ctype_t* type,
             }
 
             break;
-           
+
         } else if (tok.type == TOK_COLON) {
             int64_t bsize = calculate_constant(L, P);
 
@@ -1360,7 +1360,7 @@ const char* parse_argument(lua_State* L, parser_t* P, int ct_usr, ctype_t* type,
             type->is_bitfield = 1;
             type->bit_size = (size_t) bsize;
             break;
-           
+
         } else if (tok.type != TOK_TOKEN) {
             /* we've reached the end of the declaration */
             put_back(P);

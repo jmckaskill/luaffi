@@ -223,7 +223,7 @@ for convention,c in pairs(dlls) do
     check_align('struct sysv5', '1 2 3', c.print_sysv5(psz, palign, buf, {1,2,3}))
     check_align('struct sysv6', '1 2 3', c.print_sysv6(psz, palign, buf, {1,2,3}))
     check_align('struct sysv7', '1 2 3 4 5', c.print_sysv7(psz, palign, buf, {1,2,3,4,5}))
-    
+
     local cbs = [[
     int call_i(int (*__cdecl func)(int), int arg);
     float call_f(float (*__cdecl func)(float), float arg);

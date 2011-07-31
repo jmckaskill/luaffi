@@ -190,7 +190,7 @@ static void compile_extern_jump(jit_t* jit, lua_State* L, function_t func, uint8
      * eg on 64 bit:
      * 0-8: function ptr
      * 8-14: jmp aword [rip-14]
-     * 
+     *
      * for 32 bit we only set the function ptr as it can always fit in a 32
      * bit displacement
      */
@@ -291,7 +291,7 @@ void compile_globals(jit_t* jit, lua_State* L)
     | mov eax, [rsp+32]
     | call_rr extern lua_pushboolean, L_ARG, rax
     | jmp ->return
-    
+
     |->return_int:
     | mov [rsp+32], eax
     | get_errno
@@ -494,7 +494,7 @@ static void get_float(Dst_DECL, const ctype_t* ct, struct reg_alloc* reg, int is
     }
 #else
     int off;
-    
+
 #ifdef _WIN64
     if (reg->regs < MAX_REGISTERS(ct)) {
         off = -24 - 8*reg->regs;
@@ -510,7 +510,7 @@ static void get_float(Dst_DECL, const ctype_t* ct, struct reg_alloc* reg, int is
         off = reg->off;
         reg->off += is_double ? 8 : 4;
     }
-    
+
     if (is_double) {
         | movq xmm0, qword [rbp + off]
     } else {
@@ -758,7 +758,7 @@ function_t push_callback(jit_t* jit, lua_State* L, int fidx, int ct_usr, const c
         | mov [rsp+32], rax
         | call_rr extern lua_settop, L_ARG, -4
         | mov rax, [rsp+32]
-        
+
     } else {
         switch (mt->type) {
         case ENUM_TYPE:
@@ -791,7 +791,7 @@ function_t push_callback(jit_t* jit, lua_State* L, int fidx, int ct_usr, const c
         case UINT8_TYPE:
         case UINT16_TYPE:
         case UINT32_TYPE:
-            | call_rr extern to_uint32, L_ARG, -1 
+            | call_rr extern to_uint32, L_ARG, -1
             | mov [rsp+32], eax
             | call_rr extern lua_settop, L_ARG, -3
             | mov eax, [rsp+32]
@@ -957,7 +957,7 @@ void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const 
     for (i = 1; i <= nargs; i++) {
         lua_rawgeti(L, ct_usr, (int) i);
         mbr_ct = (const ctype_t*) lua_touserdata(L, -1);
-        
+
         if (mbr_ct->pointers) {
             lua_getuservalue(L, -1);
             num_upvals += 2;
@@ -1024,13 +1024,13 @@ void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const 
                 add_pointer(Dst, ct, &reg);
                 lua_pop(L, 1);
                 break;
-            
+
             case INT64_TYPE:
                 | call_rr extern to_int64, L_ARG, i
                 add_int(Dst, ct, &reg, 1);
                 lua_pop(L, 1);
                 break;
-            
+
             case UINT64_TYPE:
                 | call_rr extern to_uint64, L_ARG, i
                 add_int(Dst, ct, &reg, 1);
@@ -1171,11 +1171,11 @@ void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const 
     switch (reg.floats) {
     case 8:
         | movq xmm7, qword [rsp + 8*(MAX_INT_REGISTERS(ct)+7)]
-    case 7: 
+    case 7:
         | movq xmm6, qword [rsp + 8*(MAX_INT_REGISTERS(ct)+6)]
-    case 6: 
+    case 6:
         | movq xmm5, qword [rsp + 8*(MAX_INT_REGISTERS(ct)+5)]
-    case 5: 
+    case 5:
         | movq xmm4, qword [rsp + 8*(MAX_INT_REGISTERS(ct)+4)]
     case 4:
         | movq xmm3, qword [rsp + 8*(MAX_INT_REGISTERS(ct)+3)]

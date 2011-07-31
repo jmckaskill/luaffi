@@ -93,12 +93,12 @@ function_t push_callback(jit_t* jit, lua_State* L, int fidx, int ct_usr, const c
     for (i = 1; i <= nargs; i++) {
         lua_rawgeti(L, ct_usr, i);
         mt = (const ctype_t*) lua_touserdata(L, -1);
-        
+
         if (mt->pointers) {
             lua_getuservalue(L, -1);
             lua_rawseti(L, -3, ++num_upvals); /* usr value */
             lua_rawseti(L, -2, ++num_upvals); /* mt */
-            
+
             | mov r2, #num_upvals-1 // usr value
             | mvn r1, #i // -i-1, stack is upval table, func, i-1 args
             | lcall extern lua_rawgeti
@@ -314,7 +314,7 @@ function_t push_callback(jit_t* jit, lua_State* L, int fidx, int ct_usr, const c
             | mov r1, DATA2
             lua_pop(L, 1);
             break;
-        
+
         default:
             luaL_error(L, "NYI: callback return type");
         }
@@ -392,7 +392,7 @@ void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const 
     for (i = 1; i <= nargs; i++) {
         lua_rawgeti(L, ct_usr, i);
         mt = (const ctype_t*) lua_touserdata(L, -1);
-        
+
         if (mt->pointers || mt->type == FUNCTION_TYPE || mt->type == ENUM_TYPE) {
             lua_getuservalue(L, -1);
             num_upvals += 2;
