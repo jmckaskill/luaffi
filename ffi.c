@@ -25,11 +25,11 @@ static int type_error(lua_State* L, int idx, const char* to_type, int to_usr, co
 
     if (to_cdata(L, idx, &ft)) {
         push_type_name(L, -1, &ft);
-        lua_pushfstring(L, "unable to convert argument %d from ctype %s to ctype ", idx, lua_tostring(L, -1));
+        lua_pushfstring(L, "unable to convert argument %d from cdata<%s> to cdata<", idx, lua_tostring(L, -1));
         lua_remove(L, -2);
         luaL_addvalue(&B);
     } else {
-        lua_pushfstring(L, "unable to convert argument %d from lua type %s to ctype ", idx, luaL_typename(L, idx));
+        lua_pushfstring(L, "unable to convert argument %d from lua<%s> to cdata<", idx, luaL_typename(L, idx));
         luaL_addvalue(&B);
     }
 
@@ -39,6 +39,8 @@ static int type_error(lua_State* L, int idx, const char* to_type, int to_usr, co
     } else {
         luaL_addstring(&B, to_type);
     }
+
+    luaL_addchar(&B, '>');
 
     luaL_pushresult(&B);
     return lua_error(L);
