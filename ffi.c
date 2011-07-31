@@ -308,6 +308,7 @@ static void* to_pointer(lua_State* L, int idx, ctype_t* ct)
         ct->type = INT8_TYPE;
         ct->is_array = 1;
         ct->base_size = 1;
+        ct->const_mask = 2;
         lua_pushnil(L);
         return (void*) lua_tolstring(L, idx, &ct->array_size);
 
@@ -340,7 +341,7 @@ static int is_void_ptr(const ctype_t* ct)
 static int is_same_type(lua_State* L, int usr1, int usr2, const ctype_t* t1, const ctype_t* t2)
 {
     return t1->type == t2->type
-        && (t1->type < UNION_TYPE || lua_rawequal(L, usr1, usr2));
+        && (!IS_COMPLEX(t1->type) || lua_rawequal(L, usr1, usr2));
 }
 
 static void set_struct(lua_State* L, int idx, void* to, int to_usr, const ctype_t* tt, int check_pointers);
@@ -364,6 +365,12 @@ void* to_typed_pointer(lua_State* L, int idx, int to_usr, const ctype_t* tt)
 
     p = to_pointer(L, idx, &ft);
 
+    if (tt->pointers == 1 && ft.pointers == 0 && (ft.type == STRUCT_TYPE || ft.type == UNION_TYPE)) {
+        /* auto dereference structs */
+        ft.pointers = 1;
+        ft.const_mask <<= 1;
+    }
+
     if (is_void_ptr(tt)) {
         /* any pointer can convert to void* */
         goto suc;
@@ -371,16 +378,18 @@ void* to_typed_pointer(lua_State* L, int idx, int to_usr, const ctype_t* tt)
     } else if (ft.is_null) {
         /* NULL can convert to any pointer */
         goto suc;
-    }
-    
-    if (!is_same_type(L, to_usr, -1, tt, &ft)) {
+
+    } else if (!is_same_type(L, to_usr, -1, tt, &ft)) {
+        /* the base type is different */
         goto err;
-    }
-    
-    /* auto dereference structs */
-    if (tt->pointers + ft.pointers == 1 && (ft.type == STRUCT_TYPE || ft.type == UNION_TYPE)) {
-        goto suc;
+
     } else if (tt->pointers != ft.pointers) {
+        goto err;
+
+    } else if (ft.const_mask & ~tt->const_mask) {
+        /* for every const in from it must be in to, there are further rules
+         * for const casting (see the c++ spec), but they are hard to test
+         * quickly */
         goto err;
     }
 
@@ -503,6 +512,7 @@ static void set_array(lua_State* L, int idx, void* to, int to_usr, const ctype_t
     case LUA_TTABLE:
         et = *tt;
         et.pointers--;
+        et.const_mask >>= 1;
         et.is_array = 0;
         esz = et.pointers ? sizeof(void*) : et.base_size;
 
@@ -932,14 +942,12 @@ static int ffi_istype(lua_State* L)
     if (!to_cdata(L, 2, &ft)) {
         goto fail;
     }
-   
+
     if (!is_same_type(L, 3, 4, &tt, &ft)) {
         goto fail;
     }
 
-    if (tt.pointers + ft.pointers == 1 && (ft.type == UNION_TYPE || tt.type == STRUCT_TYPE)) {
-        ft.pointers = tt.pointers;
-    } else if (tt.pointers != ft.pointers) {
+    if (tt.pointers != ft.pointers) {
         goto fail;
     }
 
@@ -1014,6 +1022,7 @@ static void* lookup_cdata_index(lua_State* L, ctype_t* type)
 
         type->is_array = 0;
         type->pointers--;
+        type->const_mask >>= 1;
 
         lua_getuservalue(L, 1);
 
@@ -1044,6 +1053,11 @@ static int cdata_newindex(lua_State* L)
 {
     ctype_t tt;
     void *to = lookup_cdata_index(L, &tt);
+
+    if (tt.const_mask & 1) {
+        return luaL_error(L, "can't set const data");
+    }
+
     set_value(L, 3, to, -1, &tt, 1);
     return 0;
 }

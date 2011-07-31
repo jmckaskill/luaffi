@@ -879,7 +879,11 @@ int parse_type(lua_State* L, parser_t* P, ctype_t* ct)
         if (tok.type != TOK_TOKEN) {
             return luaL_error(L, "unexpected value before type name on line %d", P->line);
 
-        } else if (IS_LITERAL(tok, "const") || IS_LITERAL(tok, "volatile")) {
+        } else if (IS_LITERAL(tok, "const")) {
+            ct->const_mask = 1;
+            require_token(L, P, &tok);
+
+        } else if (IS_LITERAL(tok, "volatile")) {
             /* ignored for now */
             require_token(L, P, &tok);
 
@@ -905,6 +909,7 @@ int parse_type(lua_State* L, parser_t* P, ctype_t* ct)
         parse_record(L, P, ct);
 
     } else {
+        int const_mask = ct->const_mask;
         put_back(P);
         parse_type_name(L, P);
 
@@ -916,6 +921,7 @@ int parse_type(lua_State* L, parser_t* P, ctype_t* ct)
         }
 
         *ct = *(const ctype_t*) lua_touserdata(L, -1);
+        ct->const_mask = const_mask;
         lua_getuservalue(L, -1);
         lua_replace(L, -2);
     }
@@ -942,6 +948,10 @@ static void append_type_name(luaL_Buffer* B, int usr, const ctype_t* ct)
 {
     size_t i;
     lua_State* L = B->L;
+
+    if (ct->type != FUNCTION_TYPE && (ct->const_mask & (1 << ct->pointers))) {
+        luaL_addstring(B, "const ");
+    }
 
     switch (ct->type) {
     case ENUM_TYPE:
@@ -1011,8 +1021,15 @@ static void append_type_name(luaL_Buffer* B, int usr, const ctype_t* ct)
         luaL_error(L, "internal error - bad type");
     }
 
+    if (ct->type == FUNCTION_TYPE && (ct->const_mask & (1 << ct->pointers))) {
+        luaL_addstring(B, " const");
+    }
+
     for (i = 0; i < ct->pointers - ct->is_array; i++) {
         luaL_addchar(B, '*');
+        if (ct->const_mask & (1 << (ct->pointers - i - 1))) {
+            luaL_addstring(B, " const");
+        }
     }
 
     if (ct->is_array) {
@@ -1237,7 +1254,11 @@ const char* parse_argument(lua_State* L, parser_t* P, int ct_usr, ctype_t* type,
             break;
 
         } else if (tok.type == TOK_STAR) {
+            if (type->pointers == POINTER_MAX) {
+                luaL_error(L, "maximum number of pointer derefs reached - use a struct to break up the pointers");
+            }
             type->pointers++;
+            type->const_mask <<= 1;
 
         } else if (tok.type == TOK_REFERENCE) {
             luaL_error(L, "NYI: c++ reference types");
@@ -1267,7 +1288,11 @@ const char* parse_argument(lua_State* L, parser_t* P, int ct_usr, ctype_t* type,
                         break;
 
                     } else if (tok.type == TOK_STAR) {
+                        if (type->pointers == POINTER_MAX) {
+                            luaL_error(L, "maximum number of pointer derefs reached - use a struct to break up the pointers");
+                        }
                         type->pointers++;
+                        type->const_mask <<= 1;
 
                     } else if (tok.type != TOK_TOKEN) {
                         luaL_error(L, "unexpected token in function on line %d", P->line);
@@ -1317,8 +1342,12 @@ const char* parse_argument(lua_State* L, parser_t* P, int ct_usr, ctype_t* type,
 
         } else if (tok.type == TOK_OPEN_SQUARE) {
             /* array */
+            if (type->pointers == POINTER_MAX) {
+                luaL_error(L, "maximum number of pointer derefs reached - use a struct to break up the pointers");
+            }
             type->is_array = 1;
             type->pointers++;
+            type->const_mask <<= 1;
             require_token(L, P, &tok);
 
             if (type->pointers == 1 && !type->is_defined) {
@@ -1379,7 +1408,10 @@ const char* parse_argument(lua_State* L, parser_t* P, int ct_usr, ctype_t* type,
             type->calling_convention = FAST_CALL;
 #endif
 
-        } else if (IS_LITERAL(tok, "const") || IS_LITERAL(tok, "volatile")) {
+        } else if (IS_LITERAL(tok, "const")) {
+            type->const_mask |= 1;
+
+        } else if (IS_LITERAL(tok, "volatile")) {
             /* ignored for now */
 
         } else {
@@ -1514,6 +1546,10 @@ static int parse_root(lua_State* L, parser_t* P)
 
         } else if (tok.type != TOK_TOKEN) {
             return luaL_error(L, "unexpected character on line %d", P->line);
+
+        } else if (IS_LITERAL(tok, "extern")) {
+            /* ignore extern as data and functions can only be extern */
+            continue;
 
         } else if (IS_LITERAL(tok, "typedef")) {
             parse_typedef(L, P);

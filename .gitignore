@@ -10,3 +10,4 @@ call_*.h
 *.o
 *.so
 .*.swo
+.DS_Store

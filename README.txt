@@ -76,7 +76,6 @@ windows.
 
 Todo
 ----
-- static const int
 - C++ classes (excluding inline c++ functions)
 - All the various gcc and msvc attributes
 - Finish and test OSX support

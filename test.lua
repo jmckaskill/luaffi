@@ -287,6 +287,11 @@ assert(ffi.sizeof(ffi.new('struct vls', 4).d.c) == 5)
 ffi.cdef [[ static const int DUMMY = 8 << 2; ]]
 assert(ffi.C.DUMMY == 32)
 
+ffi.new('struct {const char* foo;}', {'foo'})
+
+assert(not pcall(function()
+    ffi.new('struct {char* foo;}', {'ff'})
+end))
 
 print('Test PASSED')
 

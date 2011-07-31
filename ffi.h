@@ -252,9 +252,6 @@ enum {
  * light userdata -> misc
  */
 
-#define POINTER_BITS 4
-#define POINTER_MAX ((2 << POINTER_BITS) - 2)
-
 enum {
     C_CALL,
     STD_CALL,
@@ -282,6 +279,10 @@ enum {
 };
 
 #define IS_CHAR(type) ((type) == INT8_TYPE || (type) == UINT8_TYPE)
+#define IS_COMPLEX(type) ((type) == STRUCT_TYPE || (type) == UNION_TYPE || (type) == ENUM_TYPE || (type) == FUNCTION_TYPE)
+
+#define POINTER_BITS 2
+#define POINTER_MAX ((1 << POINTER_BITS) - 1)
 
 /* Note: if adding a new member that is associated with a struct/union
  * definition then it needs to be copied over in ctype.c:set_defined for when
@@ -292,8 +293,12 @@ enum {
  */
 typedef struct ctype_t {
     union {
-        /* size of bitfield in bits - valid if is_bitfield */
-        size_t bit_size;
+        struct {
+            /* size of bitfield in bits - valid if is_bitfield */
+            unsigned bit_size : 7;
+            /* offset within the current byte between 0-63 */
+            unsigned bit_offset : 6;
+        };
         /* size of the base type in bytes - valid if !is_bitfield */
         size_t base_size;
     };
@@ -308,7 +313,8 @@ typedef struct ctype_t {
     };
     size_t offset;
     unsigned align_mask : 4; /* as align bytes - 1 eg 7 gives 8 byte alignment */
-    unsigned pointers : 4; /* number of dereferences to get to the base type including +1 for arrays */
+    unsigned pointers : POINTER_BITS; /* number of dereferences to get to the base type including +1 for arrays */
+    unsigned const_mask : POINTER_MAX + 1; /* const pointer mask, LSB is current pointer, +1 for the whether the base type is const */
     unsigned type : 5; /* value given by type enum above */
     unsigned is_reference : 1;
     unsigned is_array : 1;
@@ -321,7 +327,6 @@ typedef struct ctype_t {
     unsigned is_variable_struct : 1;
     unsigned variable_size_known : 1; /* used for variable structs after we know the variable size */
     unsigned is_bitfield : 1;
-    unsigned bit_offset : 6; /* offset within the current byte between 0-63 */
 } ctype_t;
 
 typedef union cdata_t cdata_t;
