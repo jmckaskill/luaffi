@@ -281,7 +281,6 @@ enum {
     FUNCTION_TYPE,
 };
 
-#define IS_UNSIGNED(type) (type >= UINT8_TYPE)
 #define IS_CHAR(type) ((type) == INT8_TYPE || (type) == UINT8_TYPE)
 
 /* Note: if adding a new member that is associated with a struct/union

@@ -1191,8 +1191,7 @@ static int64_t to_intptr(lua_State* L, int idx, ctype_t* ct)
     case LUA_TNUMBER:
         memset(ct, 0, sizeof(*ct));
         ct->base_size = 8;
-        ct->type = DOUBLE_TYPE;
-        ct->pointers = 0;
+        ct->type = INT64_TYPE;
         ret = lua_tonumber(L, idx);
         lua_pushnil(L);
         return ret;
@@ -1389,14 +1388,11 @@ static int cdata_unm(lua_State* L)
     right = to_intptr(L, 2, &rt);                                           \
                                                                             \
     if (lt.pointers && rt.pointers) {                                       \
-        if (!is_void_ptr(&lt) && !is_void_ptr(&rt) && !is_same_type(L, 3, 4, &lt, &rt)) { \
-            lua_getuservalue(L, 1);                                         \
-            lua_getuservalue(L, 2);                                         \
-            push_type_name(L, -2, &lt);                                     \
-            push_type_name(L, -2, &lt);                                     \
-            return luaL_error(L, "trying to compare incompatible pointers of types %s and %s", lua_tostring(L, -2), lua_tostring(L, -1));\
+        if (is_void_ptr(&lt) || is_void_ptr(&rt) || is_same_type(L, 3, 4, &lt, &rt)) { \
+            res = OP((uint64_t) left, (uint64_t) right);                    \
+        } else {                                                            \
+            goto err;                                                       \
         }                                                                   \
-        res = OP((uint64_t) left, (uint64_t) right);                        \
                                                                             \
     } else if (lt.pointers && rt.type == UINTPTR_TYPE) {                    \
         res = OP((uint64_t) left, (uint64_t) right);                        \
@@ -1405,15 +1401,15 @@ static int cdata_unm(lua_State* L)
         res = OP((uint64_t) left, (uint64_t) right);                        \
                                                                             \
     } else if (rt.pointers || lt.pointers) {                                \
-        return luaL_error(L, "trying to compare pointer and integer");      \
+        goto err;                                                           \
                                                                             \
-    } else if (IS_UNSIGNED(lt.type) && IS_UNSIGNED(rt.type)) {              \
+    } else if (lt.type != INT64_TYPE && rt.type != INT64_TYPE) {            \
         res = OP((uint64_t) left, (uint64_t) right);                        \
                                                                             \
-    } else if (IS_UNSIGNED(lt.type)) {                                      \
+    } else if (lt.type != INT64_TYPE) {                                     \
         res = OP((int64_t) (uint64_t) left, right);                         \
                                                                             \
-    } else if (IS_UNSIGNED(rt.type)) {                                      \
+    } else if (rt.type != INT64_TYPE) {                                     \
         res = OP(left, (int64_t) (uint64_t) right);                         \
                                                                             \
     } else {                                                                \
@@ -1428,13 +1424,34 @@ static int cdata_unm(lua_State* L)
 #define LE(l, r) (l) <= (r)
 
 static int cdata_eq(lua_State* L)
-{ COMPARE_BINOP(EQ); }
+{
+    COMPARE_BINOP(EQ);
+err:
+    lua_pushboolean(L, 0);
+    return 1;
+}
 
 static int cdata_lt(lua_State* L)
-{ COMPARE_BINOP(LT); }
+{
+    COMPARE_BINOP(LT);
+err:
+    lua_getuservalue(L, 1);
+    lua_getuservalue(L, 2);
+    push_type_name(L, -2, &lt);
+    push_type_name(L, -2, &lt);
+    return luaL_error(L, "trying to compare incompatible types %s and %s", lua_tostring(L, -2), lua_tostring(L, -1));
+}
 
 static int cdata_le(lua_State* L)
-{ COMPARE_BINOP(LE); }
+{
+    COMPARE_BINOP(LE);
+err:
+    lua_getuservalue(L, 1);
+    lua_getuservalue(L, 2);
+    push_type_name(L, -2, &lt);
+    push_type_name(L, -2, &lt);
+    return luaL_error(L, "trying to compare incompatible types %s and %s", lua_tostring(L, -2), lua_tostring(L, -1));
+}
 
 static int ctype_tostring(lua_State* L)
 {
