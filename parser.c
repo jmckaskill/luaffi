@@ -295,7 +295,7 @@ static int parse_enum(lua_State* L, parser_t* P, ctype_t* type)
     return 0;
 }
 
-static int calculate_member_position(lua_State* L, parser_t* P, int is_named, ctype_t* ct, ctype_t* mt, int* pbit_offset, int* pbits_left)
+static int calculate_member_position(lua_State* L, parser_t* P, ctype_t* ct, ctype_t* mt, int* pbit_offset, int* pbits_left)
 {
     int malign = (mt->pointers - mt->is_array) ? PTR_ALIGN_MASK : mt->align_mask;
     int palign = min(P->align_mask, malign);
@@ -351,7 +351,7 @@ static int calculate_member_position(lua_State* L, parser_t* P, int is_named, ct
         bits_left = (int) ((ALIGN_UP(ct->base_size + 1, malign) - ct->base_size) * CHAR_BIT) - bit_offset;
 #endif
 
-        if (is_named && mt->bit_size == 0) {
+        if (mt->has_member_name && mt->bit_size == 0) {
             luaL_error(L, "zero length bitfields must be unnamed on line %d", P->line);
         }
 
@@ -401,7 +401,7 @@ static int calculate_member_position(lua_State* L, parser_t* P, int is_named, ct
         }
 #else
         /* unnamed bitfields don't update the struct alignment */
-        if (!is_named) {
+        if (!mt->has_member_name) {
             malign = palign = 0;
         }
 
@@ -495,25 +495,26 @@ static int copy_submembers(lua_State* L, int to_usr, int from_usr, const ctype_t
     return 0;
 }
 
-static int add_member(lua_State* L, int ct_usr, const ctype_t* ct, int mbr_usr, const ctype_t* mt, const char* mname, size_t mnamesz, int* midx)
+static int add_member(lua_State* L, int ct_usr, int mname, int mbr_usr, const ctype_t* mt, int* midx)
 {
     ct_usr = lua_absindex(L, ct_usr);
-    mbr_usr = lua_absindex(L, mbr_usr);
+    mname = lua_absindex(L, mname);
 
     push_ctype(L, mbr_usr, mt);
 
-    if (ct->type == STRUCT_TYPE || *midx == 1) {
-        /* usrvalue[mbr index] = pushed mtype */
-        lua_pushvalue(L, -1);
-        lua_rawseti(L, ct_usr, (*midx)++);
-    }
+    /* usrvalue[mbr index] = pushed mtype */
+    lua_pushvalue(L, -1);
+    lua_rawseti(L, ct_usr, (*midx)++);
 
-    if (mname) {
-        /* set usrvalue[mname] = pushed mtype */
-        lua_pushlstring(L, mname, mnamesz);
-        lua_pushvalue(L, -2);
-        lua_rawset(L, ct_usr);
-    }
+    /* set usrvalue[mname] = pushed mtype */
+    lua_pushvalue(L, mname);
+    lua_pushvalue(L, -2);
+    lua_rawset(L, ct_usr);
+
+    /* set usrvalue[mtype] = mname */
+    lua_pushvalue(L, -1);
+    lua_pushvalue(L, mname);
+    lua_rawset(L, ct_usr);
 
     lua_pop(L, 1);
 
@@ -521,21 +522,20 @@ static int add_member(lua_State* L, int ct_usr, const ctype_t* ct, int mbr_usr, 
 }
 
 /* Parses a struct from after the open curly through to the close curly.
- * Expects the user table to be on the top of the stack.
  */
-static int parse_struct(lua_State* L, parser_t* P, ctype_t* ct)
+static int parse_struct(lua_State* L, parser_t* P, int tmp_usr, const ctype_t* ct)
 {
-    int midx = 1;
-    int bit_offset = 0;
-    int bits_left = 0;
     token_t tok;
-    int ct_usr = lua_gettop(L);
+    int midx = 1;
+    int top = lua_gettop(L);
+
+    tmp_usr = lua_absindex(L, tmp_usr);
 
     /* parse members */
     for (;;) {
         ctype_t mbase;
 
-        assert(lua_gettop(L) == ct_usr);
+        assert(lua_gettop(L) == top);
 
         /* see if we're at the end of the struct */
         require_token(L, P, &tok);
@@ -566,9 +566,9 @@ static int parse_struct(lua_State* L, parser_t* P, ctype_t* ct)
                 return luaL_error(L, "can't have members after a variable sized member on line %d", P->line);
             }
 
-            assert(lua_gettop(L) == ct_usr + 1);
+            assert(lua_gettop(L) == top + 1);
             mname = parse_argument(L, P, -1, &mt, &mnamesz);
-            assert(lua_gettop(L) == ct_usr + 2);
+            assert(lua_gettop(L) == top + 2);
 
             if (!mt.is_defined && (mt.pointers - mt.is_array) == 0) {
                 return luaL_error(L, "member type is undefined on line %d", P->line);
@@ -578,24 +578,14 @@ static int parse_struct(lua_State* L, parser_t* P, ctype_t* ct)
                 return luaL_error(L, "member type can not be void on line %d", P->line);
             }
 
-            calculate_member_position(L, P, mname != NULL, ct, &mt, &bit_offset, &bits_left);
+            mt.has_member_name = (mnamesz > 0);
+            lua_pushlstring(L, mname, mnamesz);
 
-            if (mname) {
-                add_member(L, ct_usr, ct, -1, &mt, mname, mnamesz, &midx);
-            } else if (mt.type == STRUCT_TYPE || mt.type == UNION_TYPE) {
-                /* With an unnamed member we copy all of the submembers
-                 * into our usr value adjusting the offset as necessary.
-                 * Note ctypes are immutable so need to push a new ctype
-                 * to update the offset.
-                 */
-                copy_submembers(L, ct_usr, -1, &mt, &midx);
-            }
-            /* We ignore unnamed members that aren't structs or unions.
-             * These are there just to change the padding */
+            add_member(L, tmp_usr, -1, -2, &mt, &midx);
 
-            /* pop the usr value from push_argument */
-            lua_pop(L, 1);
-            assert(lua_gettop(L) == ct_usr + 1);
+            /* pop the usr value from push_argument and the member name */
+            lua_pop(L, 2);
+            assert(lua_gettop(L) == top + 1);
 
             require_token(L, P, &tok);
             if (tok.type == TOK_SEMICOLON) {
@@ -609,6 +599,55 @@ static int parse_struct(lua_State* L, parser_t* P, ctype_t* ct)
         lua_pop(L, 1);
     }
 
+    assert(lua_gettop(L) == top);
+    return 0;
+}
+
+static int calculate_struct_offsets(lua_State* L, parser_t* P, int ct_usr, ctype_t* ct, int tmp_usr)
+{
+    int i;
+    int midx = 1;
+    int sz = (int) lua_objlen(L, tmp_usr);
+    int bit_offset = 0;
+    int bits_left = 0;
+
+    ct_usr = lua_absindex(L, ct_usr);
+    tmp_usr = lua_absindex(L, tmp_usr);
+
+    for (i = 1; i <= sz; i++) {
+        ctype_t mt;
+
+        /* get the member type */
+        lua_rawgeti(L, tmp_usr, i);
+        mt = *(const ctype_t*) lua_touserdata(L, -1);
+
+        /* get the member user table */
+        lua_getuservalue(L, -1);
+
+        /* get the member name */
+        lua_pushvalue(L, -2);
+        lua_rawget(L, tmp_usr);
+
+        calculate_member_position(L, P, ct, &mt, &bit_offset, &bits_left);
+
+        if (mt.has_member_name) {
+            add_member(L, ct_usr, -1, -2, &mt, &midx);
+
+        } else if (mt.type == STRUCT_TYPE || mt.type == UNION_TYPE) {
+            /* With an unnamed member we copy all of the submembers into our
+             * usr value adjusting the offset as necessary. Note ctypes are
+             * immutable so need to push a new ctype to update the offset.
+             */
+            copy_submembers(L, ct_usr, -2, &mt, &midx);
+
+        } else {
+            /* We ignore unnamed members that aren't structs or unions. These
+             * are there just to change the padding */
+        }
+
+        lua_pop(L, 3);
+    }
+
     /* finish up the current bitfield storage unit */
     ct->base_size += (bit_offset + CHAR_BIT - 1) / CHAR_BIT;
 
@@ -618,11 +657,8 @@ static int parse_struct(lua_State* L, parser_t* P, ctype_t* ct)
     }
 
     ct->base_size = ALIGN_UP(ct->base_size, ct->align_mask);
-
-    assert(lua_gettop(L) == ct_usr);
     return 0;
 }
-
 
 /* this parses a struct or union starting with the optional
  * name before the opening brace
@@ -718,10 +754,19 @@ static int parse_record(lua_State* L, parser_t* P, ctype_t* ct)
     if (ct->type == ENUM_TYPE) {
         parse_enum(L, P, ct);
     } else {
-        parse_struct(L, P, ct);
+        /* we do a two stage parse, where we parse the content first and build up
+         * the temp user table. We then iterate over that to calculate the offsets
+         * and fill out ct_usr. This is so we can handle out of order members
+         * (eg vtable) and attributes specified at the end of the struct.
+         */
+        lua_newtable(L);
+        parse_struct(L, P, -1, ct);
+        calculate_struct_offsets(L, P, -2, ct, -1);
+        assert(lua_gettop(L) == top + 2 && lua_istable(L, -1));
+        lua_pop(L, 1);
     }
 
-    assert(lua_gettop(L) == top + 1);
+    assert(lua_gettop(L) == top + 1 && lua_istable(L, -1));
     set_defined(L, -1, ct);
     assert(lua_gettop(L) == top + 1);
     return 0;
@@ -1245,6 +1290,10 @@ const char* parse_argument(lua_State* L, parser_t* P, int ct_usr, ctype_t* type,
     token_t tok;
     const char* name = NULL;
     int top = lua_gettop(L);
+
+    if (namesz) {
+        *namesz = 0;
+    }
 
     ct_usr = lua_absindex(L, ct_usr);
 

@@ -11,3 +11,4 @@ call_*.h
 *.so
 .*.swo
 .DS_Store
+/luaffi.xcodeproj

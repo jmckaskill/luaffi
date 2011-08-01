@@ -14,7 +14,7 @@ all: $(MODSO) test_cdecl.so
 macosx:
 	$(MAKE) all "SOCC=MACOSX_DEPLOYMENT_TARGET=10.3 $(CC) -dynamiclib -single_module -undefined dynamic_lookup $(SOCFLAGS)"
 
-clean: 
+clean:
 	rm -f *.o *.so call_*.h
 
 call_x86.h: call_x86.dasc dynasm/*.lua
