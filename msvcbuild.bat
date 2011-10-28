@@ -4,9 +4,11 @@
 
 @if "%1"=="test-5.2" goto :TEST_5_2
 
+rem These should not have quotes
 @set LUA_INCLUDE=C:\Lua5.1\include
 @set LUA_LIB=C:\Lua5.1\lib\lua5.1.lib
 @set LUA_EXE=C:\Lua5.1\lua.exe
+rem This is used as a c string so any \ needs to be escaped
 @set LUA_DLL=lua5.1.dll
 @goto :DEBUG
 
@@ -34,10 +36,10 @@
 @goto :COMPILE
 
 :COMPILE
-%LUA_EXE% dynasm\dynasm.lua -LNE -D X32WIN -o call_x86.h call_x86.dasc
-%LUA_EXE% dynasm\dynasm.lua -LNE -D X64 -o call_x64.h call_x86.dasc
-%LUA_EXE% dynasm\dynasm.lua -LNE -D X64 -D X64WIN -o call_x64win.h call_x86.dasc
-%LUA_EXE% dynasm\dynasm.lua -LNE -o call_arm.h call_arm.dasc
+"%LUA_EXE%" dynasm\dynasm.lua -LNE -D X32WIN -o call_x86.h call_x86.dasc
+"%LUA_EXE%" dynasm\dynasm.lua -LNE -D X64 -o call_x64.h call_x86.dasc
+"%LUA_EXE%" dynasm\dynasm.lua -LNE -D X64 -D X64WIN -o call_x64win.h call_x86.dasc
+"%LUA_EXE%" dynasm\dynasm.lua -LNE -o call_arm.h call_arm.dasc
 %DO_CL% /I"." /I"%LUA_INCLUDE%" /DLUA_DLL_NAME="%LUA_DLL%" call.c ctype.c ffi.c parser.c
 %DO_LINK% /DLL /OUT:ffi.dll "%LUA_LIB%" *.obj
 if exist ffi.dll.manifest^
