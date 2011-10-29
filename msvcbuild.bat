@@ -8,7 +8,7 @@ rem These should not have quotes
 @set LUA_INCLUDE=C:\Lua5.1\include
 @set LUA_LIB=C:\Lua5.1\lib\lua5.1.lib
 @set LUA_EXE=C:\Lua5.1\lua.exe
-rem This is used as a c string so any \ needs to be escaped
+rem This the name of the dll that can be handed to LoadLibrary. This should not have a path.
 @set LUA_DLL=lua5.1.dll
 @goto :DEBUG
 
@@ -58,9 +58,9 @@ if exist test_stdcall.dll.manifest^
 if exist test_fastcall.dll.manifest^
     %DO_MT% -manifest test_fastcall.dll.manifest -outputresource:"test_fastcall.dll;2"
 
-@if "%1"=="test" %LUA_EXE% test.lua
-@if "%1"=="test-5.2" %LUA_EXE% test.lua
-@if "%1"=="test-release" %LUA_EXE% test.lua
+@if "%1"=="test" "%LUA_EXE%" test.lua
+@if "%1"=="test-5.2" "%LUA_EXE%" test.lua
+@if "%1"=="test-release" "%LUA_EXE%" test.lua
 @goto :CLEAN_OBJ
 
 :CLEAN
