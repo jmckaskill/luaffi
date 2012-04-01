@@ -214,33 +214,24 @@ struct ptr_align {char ch; void* v;};
 #define FUNCTION_ALIGN_MASK (sizeof(void (*)()) - 1)
 #define DEFAULT_ALIGN_MASK 7
 
-/* this needs to match the order of upvalues in luaopen_ffi
- * warning these are not copied across to function pointer closures
- */
-enum {
-    CTYPE_MT_IDX = 2,
-    CMODULE_MT_IDX,
-    CONSTANTS_IDX,
-    WEAK_KEY_MT_IDX,
-    TYPE_IDX,
-    FUNCTION_IDX,
-    ABI_PARAM_IDX,
-    GC_IDX,
-    TO_NUMBER_IDX,
-    LAST_IDX,
-};
+extern int jit_key;
+extern int ctype_mt_key;
+extern int cdata_mt_key;
+extern int cmodule_mt_key;
+extern int callback_mt_key;
+extern int constants_key;
+extern int types_key;
+extern int gc_key;
+extern int callbacks_key;
+extern int functions_key;
+extern int abi_key;
+extern int next_unnamed_key;
+extern int niluv_key;
 
-#define UPVAL_NUM (LAST_IDX - 2)
-
-#define CTYPE_MT_UPVAL lua_upvalueindex(CTYPE_MT_IDX - 1)
-#define CMODULE_MT_UPVAL lua_upvalueindex(CMODULE_MT_IDX - 1)
-#define CONSTANTS_UPVAL lua_upvalueindex(CONSTANTS_IDX - 1)
-#define WEAK_KEY_MT_UPVAL lua_upvalueindex(WEAK_KEY_MT_IDX - 1)
-#define TYPE_UPVAL lua_upvalueindex(TYPE_IDX - 1)
-#define FUNCTION_UPVAL lua_upvalueindex(FUNCTION_IDX - 1)
-#define ABI_PARAM_UPVAL lua_upvalueindex(ABI_PARAM_IDX - 1)
-#define GC_UPVAL lua_upvalueindex(GC_IDX - 1)
-#define TO_NUMBER_UPVAL lua_upvalueindex(TO_NUMBER_IDX - 1)
+int equals_upval(lua_State* L, int idx, int* key);
+void push_upval(lua_State* L, int* key);
+void set_upval(lua_State* L, int* key);
+struct jit* get_jit(lua_State* L);
 
 /* both ctype and cdata are stored as userdatas
  *
@@ -320,7 +311,6 @@ struct ctype {
     unsigned is_array : 1;
     unsigned is_defined : 1;
     unsigned is_null : 1;
-    unsigned is_jitted : 1;
     unsigned has_member_name : 1;
     unsigned calling_convention : 2;
     unsigned has_var_arg : 1;
@@ -328,6 +318,7 @@ struct ctype {
     unsigned is_variable_struct : 1;
     unsigned variable_size_known : 1; /* used for variable structs after we know the variable size */
     unsigned is_bitfield : 1;
+    unsigned is_jitted : 1;
 };
 
 #ifdef _MSC_VER
@@ -339,15 +330,16 @@ struct cdata {
       __attribute__ ((aligned(16)))
 #endif
       ;
-
 };
 
-typedef void (*function_t)(void);
+typedef void (*cfunction)(void);
 
-void set_cdata_mt(lua_State* L);
+#define CALLBACK_FUNC_USR_IDX 1
+
 void set_defined(lua_State* L, int ct_usr, struct ctype* ct);
 void push_ctype(lua_State* L, int ct_usr, const struct ctype* ct);
 void* push_cdata(lua_State* L, int ct_usr, const struct ctype* ct); /* called from asm */
+void push_callback(lua_State* L, cfunction f);
 void check_ctype(lua_State* L, int idx, struct ctype* ct);
 void* to_cdata(lua_State* L, int idx, struct ctype* ct);
 void* check_cdata(lua_State* L, int idx, struct ctype* ct);
@@ -359,10 +351,11 @@ void push_type_name(lua_State* L, int usr, const struct ctype* ct);
 
 int ffi_cdef(lua_State* L);
 
-void free_code(struct jit* jit, lua_State* L, function_t func);
+void push_func_ref(lua_State* L, cfunction func);
+void free_code(struct jit* jit, lua_State* L, cfunction func);
 int x86_stack_required(lua_State* L, int usr);
-void push_function(struct jit* jit, lua_State* L, function_t f, int ct_usr, const struct ctype* ct);
-function_t push_callback(struct jit* jit, lua_State* L, int fidx, int ct_usr, const struct ctype* ct);
+void compile_function(lua_State* L, cfunction f, int ct_usr, const struct ctype* ct);
+cfunction compile_callback(lua_State* L, int fidx, int ct_usr, const struct ctype* ct);
 void compile_globals(struct jit* jit, lua_State* L);
 int get_extern(struct jit* jit, uint8_t* addr, int idx, int type);
 
@@ -377,7 +370,7 @@ uintptr_t to_uintptr(lua_State* L, int idx);
 int32_t to_enum(lua_State* L, int idx, int to_usr, const struct ctype* tt);
 /* these two will always push a value so that we can create structs/functions on the fly */
 void* to_typed_pointer(lua_State* L, int idx, int to_usr, const struct ctype* tt);
-function_t to_typed_function(lua_State* L, int idx, int to_usr, const struct ctype* tt);
+cfunction to_typed_cfunction(lua_State* L, int idx, int to_usr, const struct ctype* tt);
 
 void unpack_varargs_stack(lua_State* L, int first, int last, char* to);
 void unpack_varargs_reg(lua_State* L, int first, int last, char* to);

@@ -3,9 +3,7 @@
  */
 #include "ffi.h"
 
-typedef struct jit_header_t jit_header_t;
-
-static function_t compile(Dst_DECL, lua_State* L, function_t func, int ref);
+static cfunction compile(Dst_DECL, lua_State* L, cfunction func, int ref);
 
 static void* reserve_code(struct jit* jit, lua_State* L, size_t sz);
 static void commit_code(struct jit* jit, void* p, size_t sz);
@@ -59,7 +57,7 @@ static void SetLastError(int err)
 #include "call_x86.h"
 #endif
 
-struct jit_header_t {
+struct jit_head {
     size_t size;
     int ref;
     uint8_t jump[JUMP_SIZE];
@@ -67,9 +65,9 @@ struct jit_header_t {
 
 #define LINKTABLE_MAX_SIZE (sizeof(extnames) / sizeof(extnames[0]) * (JUMP_SIZE))
 
-static function_t compile(struct jit* jit, lua_State* L, function_t func, int ref)
+static cfunction compile(struct jit* jit, lua_State* L, cfunction func, int ref)
 {
-    jit_header_t* code;
+    struct jit_head* code;
     size_t codesz;
     int err;
 
@@ -80,8 +78,8 @@ static function_t compile(struct jit* jit, lua_State* L, function_t func, int re
         luaL_error(L, "dasm_link error %s", buf);
     }
 
-    codesz += sizeof(jit_header_t);
-    code = (jit_header_t*) reserve_code(jit, L, codesz);
+    codesz += sizeof(struct jit_head);
+    code = (struct jit_head*) reserve_code(jit, L, codesz);
     code->ref = ref;
     code->size = codesz;
     compile_extern_jump(jit, L, func, code->jump);
@@ -94,7 +92,7 @@ static function_t compile(struct jit* jit, lua_State* L, function_t func, int re
     }
 
     commit_code(jit, code, codesz);
-    return (function_t) (code+1);
+    return (cfunction) (code+1);
 }
 
 typedef uint8_t jump_t[JUMP_SIZE];
@@ -103,7 +101,7 @@ int get_extern(struct jit* jit, uint8_t* addr, int idx, int type)
 {
     struct page* page = jit->pages[jit->pagenum-1];
     jump_t* jumps = (jump_t*) (page+1);
-    jit_header_t* h = (jit_header_t*) ((uint8_t*) page + page->off);
+    struct jit_head* h = (struct jit_head*) ((uint8_t*) page + page->off);
     uint8_t* jmp;
     ptrdiff_t off;
 
@@ -137,7 +135,7 @@ static void* reserve_code(struct jit* jit, lua_State* L, size_t sz)
     if (off + sz >= size) {
         int i;
         uint8_t* pdata;
-        function_t func;
+        cfunction func;
 
         /* need to create a new page */
         jit->pages = (struct page**) realloc(jit->pages, (++jit->pagenum) * sizeof(jit->pages[0]));
@@ -154,8 +152,8 @@ static void* reserve_code(struct jit* jit, lua_State* L, size_t sz)
 
 #define ADDFUNC(DLL, NAME) \
         lua_pushliteral(L, #NAME); \
-        func = DLL ? (function_t) GetProcAddressA(DLL, #NAME) : NULL; \
-        func = func ? func : (function_t) &NAME; \
+        func = DLL ? (cfunction) GetProcAddressA(DLL, #NAME) : NULL; \
+        func = func ? func : (cfunction) &NAME; \
         lua_pushcfunction(L, (lua_CFunction) func); \
         lua_rawset(L, -3)
 
@@ -169,7 +167,7 @@ static void* reserve_code(struct jit* jit, lua_State* L, size_t sz)
         ADDFUNC(NULL, to_uintptr);
         ADDFUNC(NULL, to_enum);
         ADDFUNC(NULL, to_typed_pointer);
-        ADDFUNC(NULL, to_typed_function);
+        ADDFUNC(NULL, to_typed_cfunction);
         ADDFUNC(NULL, unpack_varargs_stack);
         ADDFUNC(NULL, unpack_varargs_stack_skip);
         ADDFUNC(NULL, unpack_varargs_reg);
@@ -200,7 +198,7 @@ static void* reserve_code(struct jit* jit, lua_State* L, size_t sz)
 
             } else {
                 lua_getfield(L, -1, extnames[i]);
-                func = (function_t) lua_tocfunction(L, -1);
+                func = (cfunction) lua_tocfunction(L, -1);
 
                 if (func == NULL) {
                     luaL_error(L, "internal error: missing link for %s", extnames[i]);
@@ -238,10 +236,19 @@ static void commit_code(struct jit* jit, void* code, size_t sz)
     }
 }
 
-void free_code(struct jit* jit, lua_State* L, function_t func)
+/* push_func_ref pushes a copy of the upval table embedded in the compiled
+ * function func.
+ */
+void push_func_ref(lua_State* L, cfunction func)
+{
+    struct jit_head* h = ((struct jit_head*) func) - 1;
+    lua_rawgeti(L, LUA_REGISTRYINDEX, h->ref);
+}
+
+void free_code(struct jit* jit, lua_State* L, cfunction func)
 {
     size_t i;
-    jit_header_t* h = ((jit_header_t*) func) - 1;
+    struct jit_head* h = ((struct jit_head*) func) - 1;
     for (i = 0; i < jit->pagenum; i++) {
         struct page* p = jit->pages[i];
 
@@ -263,6 +270,7 @@ void free_code(struct jit* jit, lua_State* L, function_t func)
 
         FreePage(p, p->size);
         memmove(&jit->pages[i], &jit->pages[i+1], (jit->pagenum - (i+1)) * sizeof(jit->pages[0]));
+        jit->pagenum--;
         return;
     }
 

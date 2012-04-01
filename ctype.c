@@ -4,15 +4,6 @@
 #include "ffi.h"
 
 static int to_define_key;
-static int g_cdata_mt_key;
-
-void set_cdata_mt(lua_State* L)
-{
-    lua_pushlightuserdata(L, &g_cdata_mt_key);
-    lua_pushvalue(L, -2);
-    lua_rawset(L, LUA_REGISTRYINDEX);
-    lua_pop(L, 1);
-}
 
 static void update_on_definition(lua_State* L, int ct_usr, int ct_idx)
 {
@@ -23,20 +14,33 @@ static void update_on_definition(lua_State* L, int ct_usr, int ct_idx)
     lua_rawget(L, ct_usr);
 
     if (lua_isnil(L, -1)) {
-        /* usr[TO_UPDATE_KEY] = setmetatable({}, {__mode='k'}) */
-        lua_pop(L, 1);
+        lua_pop(L, 1); /* pop the nil */
+
+        /* {} */
         lua_newtable(L);
-        lua_pushvalue(L, WEAK_KEY_MT_UPVAL);
+
+        /* {__mode='k'} */
+        lua_newtable(L);
+        lua_pushliteral(L, "k");
+        lua_setfield(L, -2, "__mode");
+
+        /* setmetatable({}, {__mode='k'}) */
         lua_setmetatable(L, -2);
+
+        /* usr[TO_UPDATE_KEY] = setmetatable({}, {__mode='k'}) */
         lua_pushlightuserdata(L, &to_define_key);
         lua_pushvalue(L, -2);
         lua_rawset(L, ct_usr);
+
+        /* leave the table on the stack */
     }
 
     /* to_update[ctype or cdata] = true */
     lua_pushvalue(L, ct_idx);
     lua_pushboolean(L, 1);
     lua_rawset(L, -3);
+
+    /* pop the to_update table */
     lua_pop(L, 1);
 }
 
@@ -82,8 +86,15 @@ void push_ctype(lua_State* L, int ct_usr, const struct ctype* ct)
     ret = (struct ctype*) lua_newuserdata(L, sizeof(struct ctype));
     *ret = *ct;
 
-    lua_pushvalue(L, CTYPE_MT_UPVAL);
+    push_upval(L, &ctype_mt_key);
     lua_setmetatable(L, -2);
+
+#if LUA_VERSION_NUM == 501
+    if (lua_isnil(L, ct_usr)) {
+        push_upval(L, &niluv_key);
+        lua_setfenv(L, -2);
+    }
+#endif
 
     if (!lua_isnil(L, ct_usr)) {
         lua_pushvalue(L, ct_usr);
@@ -125,13 +136,19 @@ void* push_cdata(lua_State* L, int ct_usr, const struct ctype* ct)
     *(struct ctype*) &cd->type = *ct;
     memset(cd+1, 0, sz);
 
+#if LUA_VERSION_NUM == 501
+    if (lua_isnil(L, ct_usr)) {
+        push_upval(L, &niluv_key);
+        lua_setfenv(L, -2);
+    }
+#endif
+
     if (!lua_isnil(L, ct_usr)) {
         lua_pushvalue(L, ct_usr);
         lua_setuservalue(L, -2);
     }
 
-    lua_pushlightuserdata(L, &g_cdata_mt_key);
-    lua_rawget(L, LUA_REGISTRYINDEX);
+    push_upval(L, &cdata_mt_key);
     lua_setmetatable(L, -2);
 
     if (!ct->is_defined) {
@@ -139,6 +156,15 @@ void* push_cdata(lua_State* L, int ct_usr, const struct ctype* ct)
     }
 
     return cd+1;
+}
+
+void push_callback(lua_State* L, cfunction f)
+{
+    cfunction* pf = (cfunction*) lua_newuserdata(L, sizeof(cfunction));
+    *pf = f;
+
+    push_upval(L, &callback_mt_key);
+    lua_setmetatable(L, -2);
 }
 
 /* returns the value as a ctype, pushes the user value onto the stack */
@@ -152,95 +178,46 @@ void check_ctype(lua_State* L, int idx, struct ctype* ct)
         parse_type(L, &P, ct);
         parse_argument(L, &P, -1, ct, NULL);
         lua_remove(L, -2); /* remove the user value from parse_type */
-        return;
 
     } else if (lua_getmetatable(L, idx)) {
-        if (!lua_rawequal(L, -1, CTYPE_MT_UPVAL)) {
-            lua_pushlightuserdata(L, &g_cdata_mt_key);
-            lua_rawget(L, LUA_REGISTRYINDEX);
-
-            if (!lua_rawequal(L, -2, -1)) {
-                goto err;
-            }
-
-            lua_pop(L, 1);
+        if (!equals_upval(L, -1, &ctype_mt_key)
+                && !equals_upval(L, -1, &cdata_mt_key)) {
+            goto err;
         }
 
         lua_pop(L, 1); /* pop the metatable */
         *ct = *(struct ctype*) lua_touserdata(L, idx);
         lua_getuservalue(L, idx);
-        return;
 
-    } else if (lua_iscfunction(L, idx)) {
-        /* cdata functions have a cdata as the first upvalue */
-        if (!lua_getupvalue(L, idx, 1) || !lua_getmetatable(L, -1)) {
-            goto err;
-        }
-
-        lua_pushlightuserdata(L, &g_cdata_mt_key);
-        lua_rawget(L, LUA_REGISTRYINDEX);
-
-        if (!lua_rawequal(L, -1, -2)) {
-            goto err;
-        }
-
-        lua_pop(L, 2); /* pop the metatables */
-
-        *ct = *(struct ctype*) lua_touserdata(L, -1);
-        lua_getuservalue(L, -1);
-        lua_remove(L, -2); /* pop the ctype */
-        return;
+    } else {
+        goto err;
     }
+
+    return;
 
 err:
     luaL_error(L, "expected cdata, ctype or string for arg #%d", idx);
 }
 
-/* if the idx is a cdata returns the struct cdata* and pushes the user value onto
- * the stack, otherwise returns NULL and pushes nothing
- * also dereferences references */
+/* to_cdata returns the struct cdata* and pushes the user value onto the stack
+ * if the idx is a cdata, otherwise returns NULL and pushes nothing. Also
+ * dereferences references */
 void* to_cdata(lua_State* L, int idx, struct ctype* ct)
 {
     struct cdata* cd;
 
-    if (lua_getmetatable(L, idx)) {
-        lua_pushlightuserdata(L, &g_cdata_mt_key);
-        lua_rawget(L, LUA_REGISTRYINDEX);
-
-        if (!lua_rawequal(L, -1, -2)) {
-            lua_pop(L, 2);
-            return NULL;
-        }
-
-        lua_pop(L, 2); /* pop the metatables */
-        cd = (struct cdata*) lua_touserdata(L, idx);
-        lua_getuservalue(L, idx);
-
-    } else if (lua_iscfunction(L, idx) && lua_getupvalue(L, idx, 1)) {
-        /* cdata functions have the cdata function pointer as the first upvalue */
-        if (!lua_getmetatable(L, -1)) {
-            lua_pop(L, 1);
-            return NULL;
-        }
-
-        lua_pushlightuserdata(L, &g_cdata_mt_key);
-        lua_rawget(L, LUA_REGISTRYINDEX);
-
-        if (!lua_rawequal(L, -1, -2)) {
-            lua_pop(L, 3);
-            return NULL;
-        }
-
-        lua_pop(L, 3);
-        cd = (struct cdata*) lua_touserdata(L, -1);
-        lua_getuservalue(L, -1);
-        lua_remove(L, -2); /* remove the cdata user data */
-
-    } else {
-        return 0;
+    if (!lua_getmetatable(L, idx)) {
+        return NULL;
     }
 
+    if (!equals_upval(L, -1, &cdata_mt_key)) {
+        return NULL;
+    }
+
+    lua_pop(L, 1); /* mt */
+    cd = (struct cdata*) lua_touserdata(L, idx);
     *ct = cd->type;
+    lua_getuservalue(L, idx);
 
     if (ct->is_reference) {
         ct->is_reference = 0;
@@ -254,8 +231,8 @@ void* to_cdata(lua_State* L, int idx, struct ctype* ct)
     }
 }
 
-/* returns the struct cdata* and pushes the user value onto the stack
- * also dereferences references */
+/* check_cdata returns the struct cdata* and pushes the user value onto the
+ * stack. Also dereferences references. */
 void* check_cdata(lua_State* L, int idx, struct ctype* ct)
 {
     void* p = to_cdata(L, idx, ct);

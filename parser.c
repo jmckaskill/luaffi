@@ -226,7 +226,6 @@ static void put_back(struct parser* P)
 int64_t calculate_constant(lua_State* L, struct parser* P);
 
 static int g_name_key;
-static int g_next_unnamed_key;
 
 #ifndef max
 #define max(a,b) ((a) < (b) ? (b) : (a))
@@ -274,9 +273,11 @@ static int parse_enum(lua_State* L, struct parser* P, struct ctype* type)
         assert(lua_gettop(L) == ct_usr + 1);
 
         /* add the enum value to the constants table */
-        lua_pushvalue(L, -1);
+        push_upval(L, &constants_key);
+        lua_pushvalue(L, -2);
         lua_pushnumber(L, value);
-        lua_rawset(L, CONSTANTS_UPVAL);
+        lua_rawset(L, -3);
+        lua_pop(L, 1);
 
         assert(lua_gettop(L) == ct_usr + 1);
 
@@ -607,7 +608,7 @@ static int calculate_struct_offsets(lua_State* L, struct parser* P, int ct_usr, 
 {
     int i;
     int midx = 1;
-    int sz = (int) lua_objlen(L, tmp_usr);
+    int sz = (int) lua_rawlen(L, tmp_usr);
     int bit_offset = 0;
     int bits_left = 0;
 
@@ -675,41 +676,55 @@ static int parse_record(lua_State* L, struct parser* P, struct ctype* ct)
     if (tok.type == TOK_TOKEN) {
         /* declaration */
         lua_pushlstring(L, tok.str, tok.size);
-        lua_pushvalue(L, -1);
-        lua_rawget(L, TYPE_UPVAL);
+
+        assert(lua_gettop(L) == top+1);
+
+        /* lookup the name to see if we've seen this type before */
+        push_upval(L, &types_key);
+        lua_pushvalue(L, -2);
+        lua_rawget(L, top+2);
+
+        assert(lua_gettop(L) == top+3);
 
         if (lua_isnil(L, -1)) {
-            lua_pop(L, 1); /* pop the nil */
-            lua_newtable(L);
+            lua_pop(L, 1); /* pop the nil usr value */
+            lua_newtable(L); /* the new usr table */
+
+            /* stack layout is:
+             * top+1: record name
+             * top+2: types table
+             * top+3: new usr table
+             */
 
             lua_pushlightuserdata(L, &g_name_key);
-            lua_pushvalue(L, -3);
-            lua_rawset(L, -3); /* usr[name_key] = name */
+            lua_pushvalue(L, top+1);
+            lua_rawset(L, top+3); /* usr[name_key] = name */
 
-            lua_pushvalue(L, -2);
-            push_ctype(L, -2, ct);
-            lua_rawset(L, TYPE_UPVAL); /* type[name] = new_ctype */
+            lua_pushvalue(L, top+1);
+            push_ctype(L, top+3, ct);
+            lua_rawset(L, top+2); /* types[name] = new_ctype */
 
         } else {
             /* get the exsting declared type */
-            const struct ctype* prevt = (const struct ctype*) lua_touserdata(L, -1);
+            const struct ctype* prevt = (const struct ctype*) lua_touserdata(L, top+3);
 
             if (prevt->type != ct->type) {
-                lua_getuservalue(L, -1);
+                lua_getuservalue(L, top+3);
                 push_type_name(L, -1, ct);
-                push_type_name(L, -2, prevt);
+                push_type_name(L, top+3, prevt);
                 luaL_error(L, "type '%s' previously declared as '%s'", lua_tostring(L, -2), lua_tostring(L, -1));
             }
 
             *ct = *prevt;
 
-            /* replace the ctype at idx -1 with its usr value */
+            /* replace the ctype with its usr value */
             lua_getuservalue(L, -1);
             lua_replace(L, -2);
         }
 
-        /* remove the extra name */
-        lua_remove(L, -2);
+        /* remove the extra name and types table */
+        lua_replace(L, -3);
+        lua_pop(L, 1);
 
         assert(lua_gettop(L) == top + 1 && lua_istable(L, -1));
 
@@ -722,20 +737,23 @@ static int parse_record(lua_State* L, struct parser* P, struct ctype* ct)
 
     } else {
         /* create a new unnamed record */
-        lua_newtable(L);
+        int num;
 
-        lua_pushlightuserdata(L, &g_next_unnamed_key);
-        lua_rawget(L, TYPE_UPVAL);
+        /* get the next unnamed number */
+        push_upval(L, &next_unnamed_key);
+        num = lua_tointeger(L, -1);
+        lua_pop(L, 1);
 
+        /* increment the unnamed upval */
+        lua_pushinteger(L, num + 1);
+        set_upval(L, &next_unnamed_key);
+
+        lua_newtable(L); /* the new usr table - leave on stack */
+
+        /* usr[name_key] = num */
         lua_pushlightuserdata(L, &g_name_key);
-        lua_pushfstring(L, "%d", (int) lua_tonumber(L, -2) + 1);
-        lua_rawset(L, -4); /* usr[name_key] = tostring(next + 1) */
-
-        lua_pushlightuserdata(L, &g_next_unnamed_key);
-        lua_pushnumber(L, lua_tonumber(L, -2) + 1);
-        lua_rawset(L, TYPE_UPVAL); /* type[next] = type[next] + 1 */
-
-        lua_pop(L, 1); /* old next_unnamed */
+        lua_pushfstring(L, "%d", num);
+        lua_rawset(L, -3);
     }
 
     if (tok.type != TOK_OPEN_CURLY) {
@@ -956,15 +974,19 @@ int parse_type(lua_State* L, struct parser* P, struct ctype* ct)
     } else {
         int const_mask = ct->const_mask;
         put_back(P);
-        parse_type_name(L, P);
 
         /* lookup type */
-        lua_rawget(L, TYPE_UPVAL);
+        push_upval(L, &types_key);
+        parse_type_name(L, P);
+        lua_rawget(L, -2);
+        lua_remove(L, -2);
+
         if (lua_isnil(L, -1)) {
             lua_pushlstring(L, tok.str, tok.size);
             return luaL_error(L, "unknown type %s on line %d", lua_tostring(L, -1), P->line);
         }
 
+        /* we only want the usr tbl from the ctype in the types tbl */
         *ct = *(const struct ctype*) lua_touserdata(L, -1);
         ct->const_mask = const_mask;
         lua_getuservalue(L, -1);
@@ -994,6 +1016,8 @@ static void append_type_name(luaL_Buffer* B, int usr, const struct ctype* ct)
     size_t i;
     lua_State* L = B->L;
 
+    usr = lua_absindex(L, usr);
+
     if (ct->type != FUNCTION_TYPE && (ct->const_mask & (1 << ct->pointers))) {
         luaL_addstring(B, "const ");
     }
@@ -1020,6 +1044,9 @@ static void append_type_name(luaL_Buffer* B, int usr, const struct ctype* ct)
 
     case VOID_TYPE:
         luaL_addstring(B, "void");
+        break;
+    case BOOL_TYPE:
+        luaL_addstring(B, "bool");
         break;
     case DOUBLE_TYPE:
         luaL_addstring(B, "double");
@@ -1063,7 +1090,7 @@ static void append_type_name(luaL_Buffer* B, int usr, const struct ctype* ct)
         break;
 
     default:
-        luaL_error(L, "internal error - bad type");
+        luaL_error(L, "internal error - bad type %d", ct->type);
     }
 
     if (ct->type == FUNCTION_TYPE && (ct->const_mask & (1 << ct->pointers))) {
@@ -1149,29 +1176,35 @@ static void push_function_type_string(lua_State* L, int usr, const struct ctype*
  */
 static void parse_function_arguments(lua_State* L, struct parser* P, struct ctype* ftype, int ret_usr, struct ctype* ret_type)
 {
+    /* In this function the lua stack layout is:
+     * top+1: types upval
+     * top+2: function usr table
+     * top+3: argument ctype
+     * top+4: argument usr table
+     */
     token_t tok;
     int arg_idx = 1;
     int top = lua_gettop(L);
-    int func_usr;
 
     ret_usr = lua_absindex(L, ret_usr);
+
+    push_upval(L, &types_key);
 
     /* user table for the function type, at the end we look up the type and if
      * we find another usr table that matches exactly, we dump this one and
      * use that instead
      */
     lua_newtable(L);
-    func_usr = lua_gettop(L);
 
-    assert(lua_gettop(L) == top + 1);
+    assert(lua_gettop(L) == top + 2); /* types and usr */
 
     push_ctype(L, ret_usr, ret_type);
-    lua_rawseti(L, func_usr, 0);
+    lua_rawseti(L, top+2, 0);
 
     for (;;) {
         struct ctype arg_type;
 
-        assert(lua_gettop(L) == top + 1);
+        lua_settop(L, top+2); /* types and usr */
 
         require_token(L, P, &tok);
 
@@ -1194,8 +1227,12 @@ static void parse_function_arguments(lua_State* L, struct parser* P, struct ctyp
 
         } else if (tok.type == TOK_TOKEN) {
             put_back(P);
+
             parse_type(L, P, &arg_type);
+            assert(lua_gettop(L) == top+3);
+
             parse_argument(L, P, -1, &arg_type, NULL);
+            assert(lua_gettop(L) == top+4);
 
             /* array arguments are just treated as their base pointer type */
             arg_type.is_array = 0;
@@ -1207,49 +1244,47 @@ static void parse_function_arguments(lua_State* L, struct parser* P, struct ctyp
                 }
 
                 check_token(L, P, TOK_CLOSE_PAREN, "", "unexpected token in function argument %d on line %d", arg_idx, P->line);
-                lua_pop(L, 2);
                 break;
             }
 
-            assert(lua_gettop(L) == top + 3);
+            assert(lua_gettop(L) == top+4); /* types, usr, arg type, arg usr */
 
             push_ctype(L, -1, &arg_type);
-            lua_rawseti(L, func_usr, arg_idx++);
-
-            /* pop the type and argument usr values */
-            lua_pop(L, 2);
+            lua_rawseti(L, top+2, arg_idx++);
 
         } else {
             luaL_error(L, "unexpected token in function argument %d on line %d", arg_idx, P->line);
         }
     }
 
-    assert(lua_gettop(L) == top + 1 && lua_istable(L, -1));
+    lua_settop(L, top+2);
 
-    push_function_type_string(L, -1, ftype);
-    assert(lua_gettop(L) == top + 2);
+    push_function_type_string(L, top+2, ftype);
+    assert(lua_gettop(L) == top+3);
 
-    /* top+1 is the usr table
-     * top+2 is the type string
+    /* top+1 is the types table
+     * top+2 is the usr table
+     * top+3 is the type string
      */
 
     lua_pushvalue(L, top+2);
-    lua_rawget(L, TYPE_UPVAL);
+    lua_rawget(L, top+1);
 
     if (lua_isnil(L, -1)) {
-        lua_pushvalue(L, top+2);
-        lua_pushvalue(L, top+1);
-        lua_rawset(L, TYPE_UPVAL); /* type[name] = usr */
+        lua_pushvalue(L, top+3);
+        push_ctype(L, top+2, ftype);
+        lua_rawset(L, top+1); /* type[name] = function ctype */
 
         lua_pushlightuserdata(L, &g_name_key);
-        lua_pushvalue(L, top+2);
-        lua_rawset(L, top+1); /* usr[name_key] = name */
+        lua_pushvalue(L, top+3);
+        lua_rawset(L, top+2); /* usr[name_key] = name */
     } else {
         /* use the usr value from the type table */
-        lua_replace(L, top+1);
+        lua_replace(L, top+2);
     }
 
-    lua_settop(L, top+1);
+    lua_settop(L, top+2);
+    lua_remove(L, top+1);
     assert(lua_istable(L, -1));
 }
 
@@ -1481,7 +1516,7 @@ const char* parse_argument(lua_State* L, struct parser* P, int ct_usr, struct ct
         }
     }
 
-    if (type->calling_convention != C_CALL) {
+    if (type->type != FUNCTION_TYPE && type->calling_convention != C_CALL) {
         /* functions use ftype and have already returned */
         luaL_error(L, "calling convention annotation only allowed on functions and function pointers on line %d", P->line);
     }
@@ -1514,10 +1549,11 @@ static void parse_typedef(lua_State* L, struct parser* P)
             luaL_error(L, "Can't typedef a variable length array on line %d", P->line);
         }
 
+        push_upval(L, &types_key);
         lua_pushlstring(L, name, namesz);
-        push_ctype(L, -2, &arg_type);
-        lua_rawset(L, TYPE_UPVAL);
-        lua_pop(L, 1);
+        push_ctype(L, -3, &arg_type);
+        lua_rawset(L, -3);
+        lua_pop(L, 2); /* types and parse_argument usr tbl */
 
         require_token(L, P, &tok);
 
@@ -1528,7 +1564,7 @@ static void parse_typedef(lua_State* L, struct parser* P)
         }
     }
 
-    lua_pop(L, 1);
+    lua_pop(L, 1); /* parse_type usr tbl */
     assert(lua_gettop(L) == top);
 }
 
@@ -1613,17 +1649,17 @@ static int parse_root(lua_State* L, struct parser* P)
                 luaL_error(L, "expected constant name after 'static const int' on line %d", P->line);
             }
 
-            lua_pushlstring(L, tok.str, tok.size);
-
             check_token(L, P, TOK_ASSIGN, "", "expected = after 'static const int <name>' on line %d", P->line);
 
             val = calculate_constant(L, P);
 
             check_token(L, P, TOK_SEMICOLON, "", "expected ; after 'static const int' definition on line %d", P->line);
 
+            push_upval(L, &constants_key);
+            lua_pushlstring(L, tok.str, tok.size);
             lua_pushnumber(L, (int) val);
-            lua_rawset(L, CONSTANTS_UPVAL);
-
+            lua_rawset(L, -3);
+            lua_pop(L, 1); /*constants*/
 
         } else {
             /* type declaration, type definition, or function declaration */
@@ -1648,9 +1684,11 @@ static int parse_root(lua_State* L, struct parser* P)
             /* this was either a function or type declaration/definition - if
              * the latter then the type has already been processed */
             if (type.type == FUNCTION_TYPE && name) {
+                push_upval(L, &functions_key);
                 lua_pushlstring(L, name, namesz);
-                push_ctype(L, -2, &type);
-                lua_rawset(L, FUNCTION_UPVAL);
+                push_ctype(L, -3, &type);
+                lua_rawset(L, -3);
+                lua_pop(L, 1); /* functions upval */
             }
 
             lua_pop(L, 2);
@@ -1692,8 +1730,10 @@ static int64_t calculate_constant1(lua_State* L, struct parser* P, token_t* tok)
 
     } else if (tok->type == TOK_TOKEN) {
         /* look up name in constants table */
+        push_upval(L, &constants_key);
         lua_pushlstring(L, tok->str, tok->size);
-        lua_rawget(L, CONSTANTS_UPVAL);
+        lua_rawget(L, -2);
+        lua_remove(L, -2); /* constants table */
 
         if (!lua_isnumber(L, -1)) {
             lua_pushlstring(L, tok->str, tok->size);

@@ -165,7 +165,7 @@ local test_values = {
 local buf = ffi.new('char[256]')
 
 local function checkbuf(type, suffix, ret)
-    local str = tostring(test_values[type]):gsub('^cdata%b<>: ', '')
+    local str = tostring(test_values[type]):gsub('^cdata: ([^,]*), .*', '%1')
     check(ffi.string(buf), str)
     check(ret, #str)
 end
@@ -185,6 +185,7 @@ for convention,c in pairs(dlls) do
 
     for suffix, type in pairs{d = 'double', f = 'float', u64 = 'uint64_t', u32 = 'uint32_t', u16 = 'uint16_t', s = 'const char*', p = 'void*'} do
         local test = test_values[type]
+        --print('checkbuf', suffix, type, buf)
         checkbuf(type, suffix, c['print_' .. suffix](buf, test))
 
         if first then
@@ -207,9 +208,10 @@ for convention,c in pairs(dlls) do
     local psz = ffi.new('size_t[1]')
     local palign = ffi.new('size_t[1]')
     local function check_align(type, test, ret)
-        --print(type, test, ret, ffi.string(buf))
+        --print('check_align', type, test, ret, ffi.string(buf))
         check(ret, #test)
         check(test, ffi.string(buf))
+        --print(psz, psz[0], tonumber, ffi.number)
         check(tonumber(psz[0]), ffi.sizeof(type))
         check(tonumber(palign[0]), ffi.alignof(type))
     end
@@ -225,10 +227,11 @@ for convention,c in pairs(dlls) do
     check_align('struct sysv7', '1 2 3 4 5', c.print_sysv7(psz, palign, buf, {1,2,3,4,5}))
 
     local cbs = [[
+    typedef const char* (*__cdecl sfunc)(const char*);
     int call_i(int (*__cdecl func)(int), int arg);
     float call_f(float (*__cdecl func)(float), float arg);
     double call_d(double (*__cdecl func)(double), double arg);
-    const char* call_s(const char* (*__cdecl func)(const char*), const char* arg);
+    const char* call_s(sfunc func, const char* arg);
     ]]
 
     ffi.cdef(cbs:gsub('__cdecl', convention))
@@ -239,9 +242,21 @@ for convention,c in pairs(dlls) do
     assert(math.abs(c.call_f(function(a) return 2*a end, 3.2) - 6.4) < 0.000001)
     check(ffi.string(c.call_s(function(s) return s + u3 end, 'foobar')), 'bar')
 
+    local u2 = ffi.new('uint64_t', 2)
+    local cb = ffi.new('sfunc', function(s) return s + u3 end)
+    check(ffi.string(cb('foobar')), 'bar')
+    check(ffi.string(c.call_s(cb, 'foobar')), 'bar')
+    cb:set(function(s) return s + u2 end)
+    check(ffi.string(c.call_s(cb, 'foobar')), 'obar')
+
     local fp = ffi.new('struct fptr')
+    assert(fp.p == ffi.C.NULL)
     fp.p = function(a) return 2*a end
+    assert(fp.p ~= ffi.C.NULL)
     check(c.call_fptr(fp, 4), 8)
+    local suc, err = pcall(function() fp.p:set(function() end) end)
+    assert(not suc)
+    check(err:gsub('^.*: ',''), "can't set the function for a non-lua callback")
 
     check(c.call_fptr({function(a) return 3*a end}, 5), 15)
 

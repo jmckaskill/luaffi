@@ -2,21 +2,21 @@
 
 @setlocal
 
-@if "%1"=="test-5.2" goto :TEST_5_2
+@if "%1"=="debug-5.1" goto :DEBUG_5_1
 
 rem These should not have quotes
-@set LUA_INCLUDE=C:\Lua5.1\include
-@set LUA_LIB=C:\Lua5.1\lib\lua5.1.lib
-@set LUA_EXE=C:\Lua5.1\lua.exe
+@set LUA_INCLUDE=Z:\c\lua-5.2.0\src
+@set LUA_LIB=Z:\c\lua-5.2.0\lua5.2.lib
+@set LUA_EXE=Z:\c\lua-5.2.0\lua5.2.exe
 rem This the name of the dll that can be handed to LoadLibrary. This should not have a path.
-@set LUA_DLL=lua5.1.dll
+@set LUA_DLL=lua5.2.dll
 @goto :DEBUG
 
-:TEST_5_2
-@set LUA_INCLUDE=C:\Lua5.2\include
-@set LUA_LIB=C:\Lua5.2\lib\lua5.2.lib
-@set LUA_EXE=C:\Lua5.2\lua.exe
-@set LUA_DLL=lua5.2.dll
+:DEBUG_5_1
+@set LUA_INCLUDE=Z:\c\lua-5.1.4\src
+@set LUA_LIB=Z:\c\lua-5.1.4\lua5.1.lib
+@set LUA_EXE=Z:\c\lua-5.1.4\lua5.1.exe
+@set LUA_DLL=lua5.1.dll
 
 :DEBUG
 @set DO_CL=cl.exe /nologo /c /MDd /FC /Zi /Od /W3 /WX /D_CRT_SECURE_NO_DEPRECATE /DLUA_FFI_BUILD_AS_DLL /I"msvc"
@@ -24,6 +24,7 @@ rem This the name of the dll that can be handed to LoadLibrary. This should not 
 @set DO_MT=mt /nologo
 
 @if "%1"=="debug" goto :COMPILE
+@if "%1"=="debug-5.1" goto :COMPILE
 @if "%1"=="test" goto :COMPILE
 @if "%1"=="clean" goto :CLEAN
 @if "%1"=="release" goto :RELEASE
