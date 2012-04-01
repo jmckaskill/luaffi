@@ -178,7 +178,7 @@
 #define MAX_BRANCH INT32_MAX
 #define BRANCH_OFF 4
 
-static void compile_extern_jump(jit_t* jit, lua_State* L, function_t func, uint8_t* code)
+static void compile_extern_jump(struct jit* jit, lua_State* L, function_t func, uint8_t* code)
 {
     /* The jump code is the function pointer followed by a stub to call the
      * function pointer. The stub exists in 64 bit so we can jump to functions
@@ -204,9 +204,9 @@ static void compile_extern_jump(jit_t* jit, lua_State* L, function_t func, uint8
 #endif
 }
 
-void compile_globals(jit_t* jit, lua_State* L)
+void compile_globals(struct jit* jit, lua_State* L)
 {
-    jit_t* Dst = jit;
+    struct jit* Dst = jit;
     int* perr = &jit->last_errno;
     dasm_setup(Dst, build_actionlist);
 
@@ -353,9 +353,9 @@ int x86_stack_required(lua_State* L, int usr)
     size_t argn = lua_rawlen(L, usr);
     int ret = 0;
     for (i = 1; i <= argn; i++) {
-        const ctype_t* ct;
+        const struct ctype* ct;
         lua_rawgeti(L, usr, (int) i);
-        ct = (const ctype_t*) lua_touserdata(L, -1);
+        ct = (const struct ctype*) lua_touserdata(L, -1);
 
         if (ct->pointers) {
             ret += sizeof(void*);
@@ -415,7 +415,7 @@ struct reg_alloc {
  * We use the same register allocation logic as posix x64 with 2 int regs and 0 float regs
  */
 
-static void get_int(Dst_DECL, const ctype_t* ct, struct reg_alloc* reg, int is_int64)
+static void get_int(Dst_DECL, const struct ctype* ct, struct reg_alloc* reg, int is_int64)
 {
     /* grab the register from the shadow space */
 #ifdef _WIN64
@@ -448,7 +448,7 @@ static void get_int(Dst_DECL, const ctype_t* ct, struct reg_alloc* reg, int is_i
     }
 }
 
-static void add_int(Dst_DECL, const ctype_t* ct, struct reg_alloc* reg, int is_int64)
+static void add_int(Dst_DECL, const struct ctype* ct, struct reg_alloc* reg, int is_int64)
 {
 #ifdef _WIN64
     if (reg->regs < MAX_REGISTERS(ct)) {
@@ -481,7 +481,7 @@ static void add_int(Dst_DECL, const ctype_t* ct, struct reg_alloc* reg, int is_i
     }
 }
 
-static void get_float(Dst_DECL, const ctype_t* ct, struct reg_alloc* reg, int is_double)
+static void get_float(Dst_DECL, const struct ctype* ct, struct reg_alloc* reg, int is_double)
 {
 #if !defined _WIN64 && !defined __amd64__
     assert(MAX_FLOAT_REGISTERS(ct) == 0);
@@ -519,7 +519,7 @@ static void get_float(Dst_DECL, const ctype_t* ct, struct reg_alloc* reg, int is
 #endif
 }
 
-static void add_float(Dst_DECL, const ctype_t* ct, struct reg_alloc* reg, int is_double)
+static void add_float(Dst_DECL, const struct ctype* ct, struct reg_alloc* reg, int is_double)
 {
 #if !defined _WIN64 && !defined __amd64__
     assert(MAX_FLOAT_REGISTERS(ct) == 0);
@@ -573,11 +573,11 @@ static void add_float(Dst_DECL, const ctype_t* ct, struct reg_alloc* reg, int is
 #define get_pointer(jit, ct, reg) get_int(jit, ct, reg, 0)
 #endif
 
-function_t push_callback(jit_t* jit, lua_State* L, int fidx, int ct_usr, const ctype_t* ct)
+function_t push_callback(struct jit* jit, lua_State* L, int fidx, int ct_usr, const struct ctype* ct)
 {
     int i, nargs;
-    const ctype_t* mt;
-    jit_t* Dst = jit;
+    const struct ctype* mt;
+    struct jit* Dst = jit;
     struct reg_alloc reg;
     int num_upvals = 0;
     int top = lua_gettop(L);
@@ -636,7 +636,7 @@ function_t push_callback(jit_t* jit, lua_State* L, int fidx, int ct_usr, const c
 
     for (i = 1; i <= nargs; i++) {
         lua_rawgeti(L, ct_usr, i);
-        mt = (const ctype_t*) lua_touserdata(L, -1);
+        mt = (const struct ctype*) lua_touserdata(L, -1);
 
         if (mt->pointers) {
             lua_getuservalue(L, -1);
@@ -745,7 +745,7 @@ function_t push_callback(jit_t* jit, lua_State* L, int fidx, int ct_usr, const c
     }
 
     lua_rawgeti(L, ct_usr, 0);
-    mt = (const ctype_t*) lua_touserdata(L, -1);
+    mt = (const struct ctype*) lua_touserdata(L, -1);
 
     | call_rrrp extern lua_callk, L_ARG, nargs, (mt->pointers || mt->type != VOID_TYPE) ? 1 : 0, 0
 
@@ -874,7 +874,7 @@ function_t push_callback(jit_t* jit, lua_State* L, int fidx, int ct_usr, const c
 
     {
         void* p;
-        ctype_t ft;
+        struct ctype ft;
         function_t func;
 
         func = compile(jit, L, NULL, ref);
@@ -890,12 +890,12 @@ function_t push_callback(jit_t* jit, lua_State* L, int fidx, int ct_usr, const c
     }
 }
 
-void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const ctype_t* ct)
+void push_function(struct jit* jit, lua_State* L, function_t func, int ct_usr, const struct ctype* ct)
 {
     size_t i, nargs;
     int num_upvals;
-    const ctype_t* mbr_ct;
-    jit_t* Dst = jit;
+    const struct ctype* mbr_ct;
+    struct jit* Dst = jit;
     struct reg_alloc reg;
     void* p;
     int top = lua_gettop(L);
@@ -956,7 +956,7 @@ void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const 
 
     for (i = 1; i <= nargs; i++) {
         lua_rawgeti(L, ct_usr, (int) i);
-        mbr_ct = (const ctype_t*) lua_touserdata(L, -1);
+        mbr_ct = (const struct ctype*) lua_touserdata(L, -1);
 
         if (mbr_ct->pointers) {
             lua_getuservalue(L, -1);
@@ -1244,7 +1244,7 @@ void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const 
      */
 
     lua_rawgeti(L, ct_usr, 0);
-    mbr_ct = (const ctype_t*) lua_touserdata(L, -1);
+    mbr_ct = (const struct ctype*) lua_touserdata(L, -1);
 
     if (mbr_ct->pointers || mbr_ct->type == UINTPTR_TYPE) {
         lua_getuservalue(L, -1);

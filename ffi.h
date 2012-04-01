@@ -62,8 +62,8 @@ extern "C" {
 #define DASM_CHECKS
 #endif
 
-typedef struct jit_t jit_t;
-#define Dst_DECL	jit_t* Dst
+struct jit;
+#define Dst_DECL	struct jit* Dst
 #define Dst_REF		(Dst->ctx)
 #define DASM_EXTERN(a,b,c,d) get_extern(a,b,c,d)
 
@@ -176,25 +176,25 @@ static void luaL_setfuncs (lua_State *L, const luaL_Reg *l, int nup) {
 #define ALLOW_MISALIGNED_ACCESS
 #endif
 
-typedef struct {
+struct parser {
     int line;
     const char* next;
     const char* prev;
     int align_mask;
-} parser_t;
+};
 
-typedef struct {
+struct page {
     size_t size;
     size_t off;
     size_t freed;
-} page_t;
+};
 
-struct jit_t {
+struct jit {
     lua_State* L;
     int32_t last_errno;
     dasm_State* ctx;
     size_t pagenum;
-    page_t** pages;
+    struct page** pages;
     size_t align_page_size;
     void** globals;
     int function_extern;
@@ -207,7 +207,7 @@ struct jit_t {
 #define ALIGN_UP(PTR, MASK) \
   (( ((uintptr_t) (PTR)) + ((uintptr_t) (MASK)) ) & (~ ((uintptr_t) (MASK)) ))
 
-/* cdata_t/ctype_t */
+/* struct cdata/struct ctype */
 
 struct ptr_align {char ch; void* v;};
 #define PTR_ALIGN_MASK (((uintptr_t) &((struct ptr_align*) NULL)->v) - 1)
@@ -291,7 +291,7 @@ enum {
  * Since this is used as a header for every ctype and cdata, and we create a
  * ton of them on the stack, we try and minimise its size.
  */
-typedef struct ctype_t {
+struct ctype {
     union {
         struct {
             /* size of bitfield in bits - valid if is_bitfield */
@@ -328,15 +328,13 @@ typedef struct ctype_t {
     unsigned is_variable_struct : 1;
     unsigned variable_size_known : 1; /* used for variable structs after we know the variable size */
     unsigned is_bitfield : 1;
-} ctype_t;
-
-typedef union cdata_t cdata_t;
+};
 
 #ifdef _MSC_VER
 __declspec(align(16))
 #endif
-union cdata_t {
-    const ctype_t type
+struct cdata {
+    const struct ctype type
 #ifdef __GNUC__
       __attribute__ ((aligned(16)))
 #endif
@@ -347,26 +345,26 @@ union cdata_t {
 typedef void (*function_t)(void);
 
 void set_cdata_mt(lua_State* L);
-void set_defined(lua_State* L, int ct_usr, ctype_t* ct);
-void push_ctype(lua_State* L, int ct_usr, const ctype_t* ct);
-void* push_cdata(lua_State* L, int ct_usr, const ctype_t* ct); /* called from asm */
-void check_ctype(lua_State* L, int idx, ctype_t* ct);
-void* to_cdata(lua_State* L, int idx, ctype_t* ct);
-void* check_cdata(lua_State* L, int idx, ctype_t* ct);
-size_t ctype_size(lua_State* L, const ctype_t* ct);
+void set_defined(lua_State* L, int ct_usr, struct ctype* ct);
+void push_ctype(lua_State* L, int ct_usr, const struct ctype* ct);
+void* push_cdata(lua_State* L, int ct_usr, const struct ctype* ct); /* called from asm */
+void check_ctype(lua_State* L, int idx, struct ctype* ct);
+void* to_cdata(lua_State* L, int idx, struct ctype* ct);
+void* check_cdata(lua_State* L, int idx, struct ctype* ct);
+size_t ctype_size(lua_State* L, const struct ctype* ct);
 
-int parse_type(lua_State* L, parser_t* P, ctype_t* type);
-const char* parse_argument(lua_State* L, parser_t* P, int ct_usr, ctype_t* type, size_t* namesz);
-void push_type_name(lua_State* L, int usr, const ctype_t* ct);
+int parse_type(lua_State* L, struct parser* P, struct ctype* type);
+const char* parse_argument(lua_State* L, struct parser* P, int ct_usr, struct ctype* type, size_t* namesz);
+void push_type_name(lua_State* L, int usr, const struct ctype* ct);
 
 int ffi_cdef(lua_State* L);
 
-void free_code(jit_t* jit, lua_State* L, function_t func);
+void free_code(struct jit* jit, lua_State* L, function_t func);
 int x86_stack_required(lua_State* L, int usr);
-void push_function(jit_t* jit, lua_State* L, function_t f, int ct_usr, const ctype_t* ct);
-function_t push_callback(jit_t* jit, lua_State* L, int fidx, int ct_usr, const ctype_t* ct);
-void compile_globals(jit_t* jit, lua_State* L);
-int get_extern(jit_t* jit, uint8_t* addr, int idx, int type);
+void push_function(struct jit* jit, lua_State* L, function_t f, int ct_usr, const struct ctype* ct);
+function_t push_callback(struct jit* jit, lua_State* L, int fidx, int ct_usr, const struct ctype* ct);
+void compile_globals(struct jit* jit, lua_State* L);
+int get_extern(struct jit* jit, uint8_t* addr, int idx, int type);
 
 /* WARNING: assembly needs to be updated for prototype changes of these functions */
 double to_double(lua_State* L, int idx);
@@ -376,10 +374,10 @@ int64_t to_int64(lua_State* L, int idx);
 int32_t to_int32(lua_State* L, int idx);
 uint32_t to_uint32(lua_State* L, int idx);
 uintptr_t to_uintptr(lua_State* L, int idx);
-int32_t to_enum(lua_State* L, int idx, int to_usr, const ctype_t* tt);
+int32_t to_enum(lua_State* L, int idx, int to_usr, const struct ctype* tt);
 /* these two will always push a value so that we can create structs/functions on the fly */
-void* to_typed_pointer(lua_State* L, int idx, int to_usr, const ctype_t* tt);
-function_t to_typed_function(lua_State* L, int idx, int to_usr, const ctype_t* tt);
+void* to_typed_pointer(lua_State* L, int idx, int to_usr, const struct ctype* tt);
+function_t to_typed_function(lua_State* L, int idx, int to_usr, const struct ctype* tt);
 
 void unpack_varargs_stack(lua_State* L, int first, int last, char* to);
 void unpack_varargs_reg(lua_State* L, int first, int last, char* to);

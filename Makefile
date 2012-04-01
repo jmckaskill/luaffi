@@ -9,10 +9,15 @@ CFLAGS=-fPIC -O2 -Wall -Werror $(LUA_CFLAGS) -fvisibility=hidden -Wno-unused-fun
 MODNAME=ffi
 MODSO=$(MODNAME).so
 
-all: $(MODSO) test_cdecl.so
+	$(MAKE) all "SOCC=MACOSX_DEPLOYMENT_TARGET=10.3 $(CC) -dynamiclib -single_module -undefined dynamic_lookup $(SOCFLAGS)"
+
+all:
+	if [ `uname` = "Darwin" ]; then $(MAKE) macosx; else $(MAKE) posix; fi
 
 macosx:
-	$(MAKE) all "SOCC=MACOSX_DEPLOYMENT_TARGET=10.3 $(CC) -dynamiclib -single_module -undefined dynamic_lookup $(SOCFLAGS)"
+	$(MAKE) posix "SOCC=MACOSX_DEPLOYMENT_TARGET=10.3 $(CC) -dynamiclib -single_module -undefined dynamic_lookup $(SOCFLAGS)"
+
+posix: $(MODSO) test_cdecl.so
 
 clean:
 	rm -f *.o *.so call_*.h

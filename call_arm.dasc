@@ -11,7 +11,7 @@
 #define MAX_BRANCH ((INT32_MAX) >> 8)
 #define BRANCH_OFF 4
 
-static void compile_extern_jump(jit_t* jit, lua_State* L, function_t func, uint8_t* code)
+static void compile_extern_jump(struct jit* jit, lua_State* L, function_t func, uint8_t* code)
 {
     /* The jump code is the function pointer followed by a stub to call the
      * function pointer. The stub exists so we can jump to functions with an
@@ -42,16 +42,16 @@ static void compile_extern_jump(jit_t* jit, lua_State* L, function_t func, uint8
 | bl func
 |.endmacro
 
-void compile_globals(jit_t* jit, lua_State* L)
+void compile_globals(struct jit* jit, lua_State* L)
 {
     (void) jit;
 }
 
-function_t push_callback(jit_t* jit, lua_State* L, int fidx, int ct_usr, const ctype_t* ct)
+function_t push_callback(struct jit* jit, lua_State* L, int fidx, int ct_usr, const struct ctype* ct)
 {
-    jit_t* Dst = jit;
+    struct jit* Dst = jit;
     int i, nargs, num_upvals, ref;
-    const ctype_t* mt;
+    const struct ctype* mt;
 
     int top = lua_gettop(L);
 
@@ -92,7 +92,7 @@ function_t push_callback(jit_t* jit, lua_State* L, int fidx, int ct_usr, const c
 
     for (i = 1; i <= nargs; i++) {
         lua_rawgeti(L, ct_usr, i);
-        mt = (const ctype_t*) lua_touserdata(L, -1);
+        mt = (const struct ctype*) lua_touserdata(L, -1);
 
         if (mt->pointers) {
             lua_getuservalue(L, -1);
@@ -208,7 +208,7 @@ function_t push_callback(jit_t* jit, lua_State* L, int fidx, int ct_usr, const c
     }
 
     lua_rawgeti(L, ct_usr, 0);
-    mt = (const ctype_t*) lua_touserdata(L, -1);
+    mt = (const struct ctype*) lua_touserdata(L, -1);
 
     | mov r3, #0
     | mov r2, #((mt->pointers || mt->type != VOID_TYPE) ? 1 : 0)
@@ -327,7 +327,7 @@ function_t push_callback(jit_t* jit, lua_State* L, int fidx, int ct_usr, const c
 
     {
         void* p;
-        ctype_t ft;
+        struct ctype ft;
         function_t func;
 
         func = compile(jit, L, NULL, ref);
@@ -343,11 +343,11 @@ function_t push_callback(jit_t* jit, lua_State* L, int fidx, int ct_usr, const c
     }
 }
 
-void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const ctype_t* ct)
+void push_function(struct jit* jit, lua_State* L, function_t func, int ct_usr, const struct ctype* ct)
 {
-    jit_t* Dst = jit;
+    struct jit* Dst = jit;
     int i, nargs, num_upvals;
-    const ctype_t* mt;
+    const struct ctype* mt;
     void* p;
 
     int top = lua_gettop(L);
@@ -391,7 +391,7 @@ void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const 
 
     for (i = 1; i <= nargs; i++) {
         lua_rawgeti(L, ct_usr, i);
-        mt = (const ctype_t*) lua_touserdata(L, -1);
+        mt = (const struct ctype*) lua_touserdata(L, -1);
 
         if (mt->pointers || mt->type == FUNCTION_TYPE || mt->type == ENUM_TYPE) {
             lua_getuservalue(L, -1);
@@ -516,7 +516,7 @@ void push_function(jit_t* jit, lua_State* L, function_t func, int ct_usr, const 
     |.endmacro
 
     lua_rawgeti(L, ct_usr, 0);
-    mt = (const ctype_t*) lua_touserdata(L, -1);
+    mt = (const struct ctype*) lua_touserdata(L, -1);
 
     if (mt->pointers) {
         lua_getuservalue(L, -1);

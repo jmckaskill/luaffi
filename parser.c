@@ -60,7 +60,7 @@ static char tok1[] = {
     '>', '^', '|', '?', '#'
 };
 
-static int next_token(lua_State* L, parser_t* P, token_t* tok)
+static int next_token(lua_State* L, struct parser* P, token_t* tok)
 {
     size_t i;
     const char* s = P->next;
@@ -201,14 +201,14 @@ static int next_token(lua_State* L, parser_t* P, token_t* tok)
     }
 }
 
-static void require_token(lua_State* L, parser_t* P, token_t* tok)
+static void require_token(lua_State* L, struct parser* P, token_t* tok)
 {
     if (!next_token(L, P, tok)) {
         luaL_error(L, "unexpected end");
     }
 }
 
-static void check_token(lua_State* L, parser_t* P, int type, const char* str, const char* err, ...)
+static void check_token(lua_State* L, struct parser* P, int type, const char* str, const char* err, ...)
 {
     token_t tok;
     if (!next_token(L, P, &tok) || tok.type != type || (tok.type == TOK_TOKEN && (tok.size != strlen(str) || memcmp(tok.str, str, tok.size) != 0))) {
@@ -219,11 +219,11 @@ static void check_token(lua_State* L, parser_t* P, int type, const char* str, co
     }
 }
 
-static void put_back(parser_t* P)
+static void put_back(struct parser* P)
 { P->next = P->prev; }
 
 
-int64_t calculate_constant(lua_State* L, parser_t* P);
+int64_t calculate_constant(lua_State* L, struct parser* P);
 
 static int g_name_key;
 static int g_next_unnamed_key;
@@ -239,7 +239,7 @@ static int g_next_unnamed_key;
 /* Parses an enum definition from after the open curly through to the close
  * curly. Expects the user table to be on the top of the stack
  */
-static int parse_enum(lua_State* L, parser_t* P, ctype_t* type)
+static int parse_enum(lua_State* L, struct parser* P, struct ctype* type)
 {
     token_t tok;
     int value = -1;
@@ -295,7 +295,7 @@ static int parse_enum(lua_State* L, parser_t* P, ctype_t* type)
     return 0;
 }
 
-static int calculate_member_position(lua_State* L, parser_t* P, ctype_t* ct, ctype_t* mt, int* pbit_offset, int* pbits_left)
+static int calculate_member_position(lua_State* L, struct parser* P, struct ctype* ct, struct ctype* mt, int* pbit_offset, int* pbits_left)
 {
     int malign = (mt->pointers - mt->is_array) ? PTR_ALIGN_MASK : mt->align_mask;
     int palign = min(P->align_mask, malign);
@@ -451,9 +451,9 @@ static int calculate_member_position(lua_State* L, parser_t* P, ctype_t* ct, cty
     return 0;
 }
 
-static int copy_submembers(lua_State* L, int to_usr, int from_usr, const ctype_t* ft, int* midx)
+static int copy_submembers(lua_State* L, int to_usr, int from_usr, const struct ctype* ft, int* midx)
 {
-    ctype_t ct;
+    struct ctype ct;
     int i, sublen;
 
     from_usr = lua_absindex(L, from_usr);
@@ -464,7 +464,7 @@ static int copy_submembers(lua_State* L, int to_usr, int from_usr, const ctype_t
     for (i = 0; i < sublen; i++) {
         lua_rawgeti(L, from_usr, i);
 
-        ct = *(const ctype_t*) lua_touserdata(L, -1);
+        ct = *(const struct ctype*) lua_touserdata(L, -1);
         ct.offset += ft->offset;
         lua_getuservalue(L, -1);
 
@@ -478,7 +478,7 @@ static int copy_submembers(lua_State* L, int to_usr, int from_usr, const ctype_t
     lua_pushnil(L);
     while (lua_next(L, from_usr)) {
         if (lua_type(L, -2) == LUA_TSTRING) {
-            ctype_t ct = *(const ctype_t*) lua_touserdata(L, -1);
+            struct ctype ct = *(const struct ctype*) lua_touserdata(L, -1);
             ct.offset += ft->offset;
             lua_getuservalue(L, -1);
 
@@ -495,7 +495,7 @@ static int copy_submembers(lua_State* L, int to_usr, int from_usr, const ctype_t
     return 0;
 }
 
-static int add_member(lua_State* L, int ct_usr, int mname, int mbr_usr, const ctype_t* mt, int* midx)
+static int add_member(lua_State* L, int ct_usr, int mname, int mbr_usr, const struct ctype* mt, int* midx)
 {
     ct_usr = lua_absindex(L, ct_usr);
     mname = lua_absindex(L, mname);
@@ -523,7 +523,7 @@ static int add_member(lua_State* L, int ct_usr, int mname, int mbr_usr, const ct
 
 /* Parses a struct from after the open curly through to the close curly.
  */
-static int parse_struct(lua_State* L, parser_t* P, int tmp_usr, const ctype_t* ct)
+static int parse_struct(lua_State* L, struct parser* P, int tmp_usr, const struct ctype* ct)
 {
     token_t tok;
     int midx = 1;
@@ -533,7 +533,7 @@ static int parse_struct(lua_State* L, parser_t* P, int tmp_usr, const ctype_t* c
 
     /* parse members */
     for (;;) {
-        ctype_t mbase;
+        struct ctype mbase;
 
         assert(lua_gettop(L) == top);
 
@@ -560,7 +560,7 @@ static int parse_struct(lua_State* L, parser_t* P, int tmp_usr, const ctype_t* c
         for (;;) {
             size_t mnamesz;
             const char* mname;
-            ctype_t mt = mbase;
+            struct ctype mt = mbase;
 
             if (ct->is_variable_struct) {
                 return luaL_error(L, "can't have members after a variable sized member on line %d", P->line);
@@ -603,7 +603,7 @@ static int parse_struct(lua_State* L, parser_t* P, int tmp_usr, const ctype_t* c
     return 0;
 }
 
-static int calculate_struct_offsets(lua_State* L, parser_t* P, int ct_usr, ctype_t* ct, int tmp_usr)
+static int calculate_struct_offsets(lua_State* L, struct parser* P, int ct_usr, struct ctype* ct, int tmp_usr)
 {
     int i;
     int midx = 1;
@@ -615,11 +615,11 @@ static int calculate_struct_offsets(lua_State* L, parser_t* P, int ct_usr, ctype
     tmp_usr = lua_absindex(L, tmp_usr);
 
     for (i = 1; i <= sz; i++) {
-        ctype_t mt;
+        struct ctype mt;
 
         /* get the member type */
         lua_rawgeti(L, tmp_usr, i);
-        mt = *(const ctype_t*) lua_touserdata(L, -1);
+        mt = *(const struct ctype*) lua_touserdata(L, -1);
 
         /* get the member user table */
         lua_getuservalue(L, -1);
@@ -664,7 +664,7 @@ static int calculate_struct_offsets(lua_State* L, parser_t* P, int ct_usr, ctype
  * name before the opening brace
  * leaves the type usr value on the stack
  */
-static int parse_record(lua_State* L, parser_t* P, ctype_t* ct)
+static int parse_record(lua_State* L, struct parser* P, struct ctype* ct)
 {
     token_t tok;
     int top = lua_gettop(L);
@@ -692,7 +692,7 @@ static int parse_record(lua_State* L, parser_t* P, ctype_t* ct)
 
         } else {
             /* get the exsting declared type */
-            const ctype_t* prevt = (const ctype_t*) lua_touserdata(L, -1);
+            const struct ctype* prevt = (const struct ctype*) lua_touserdata(L, -1);
 
             if (prevt->type != ct->type) {
                 lua_getuservalue(L, -1);
@@ -773,7 +773,7 @@ static int parse_record(lua_State* L, parser_t* P, ctype_t* ct)
 }
 
 /* parses single or multi work built in types, and pushes it onto the stack */
-static int parse_type_name(lua_State* L, parser_t* P)
+static int parse_type_name(lua_State* L, struct parser* P)
 {
     token_t tok;
     int flags = 0;
@@ -910,7 +910,7 @@ static int parse_type_name(lua_State* L, parser_t* P)
  *
  * leaves the usr value of the type on the stack
  */
-int parse_type(lua_State* L, parser_t* P, ctype_t* ct)
+int parse_type(lua_State* L, struct parser* P, struct ctype* ct)
 {
     token_t tok;
     int top = lua_gettop(L);
@@ -965,7 +965,7 @@ int parse_type(lua_State* L, parser_t* P, ctype_t* ct)
             return luaL_error(L, "unknown type %s on line %d", lua_tostring(L, -1), P->line);
         }
 
-        *ct = *(const ctype_t*) lua_touserdata(L, -1);
+        *ct = *(const struct ctype*) lua_touserdata(L, -1);
         ct->const_mask = const_mask;
         lua_getuservalue(L, -1);
         lua_replace(L, -2);
@@ -989,7 +989,7 @@ int parse_type(lua_State* L, parser_t* P, ctype_t* ct)
     return 0;
 }
 
-static void append_type_name(luaL_Buffer* B, int usr, const ctype_t* ct)
+static void append_type_name(luaL_Buffer* B, int usr, const struct ctype* ct)
 {
     size_t i;
     lua_State* L = B->L;
@@ -1083,7 +1083,7 @@ static void append_type_name(luaL_Buffer* B, int usr, const ctype_t* ct)
     }
 }
 
-void push_type_name(lua_State* L, int usr, const ctype_t* ct)
+void push_type_name(lua_State* L, int usr, const struct ctype* ct)
 {
     luaL_Buffer B;
     usr = lua_absindex(L, usr);
@@ -1092,7 +1092,7 @@ void push_type_name(lua_State* L, int usr, const ctype_t* ct)
     luaL_pushresult(&B);
 }
 
-static void push_function_type_string(lua_State* L, int usr, const ctype_t* ct)
+static void push_function_type_string(lua_State* L, int usr, const struct ctype* ct)
 {
     size_t i, args;
     luaL_Buffer B;
@@ -1107,7 +1107,7 @@ static void push_function_type_string(lua_State* L, int usr, const ctype_t* ct)
      * and use indexes relative to top to avoid problems due to the buffer
      * system pushing a variable number of arguments onto the stack */
     luaL_buffinit(L, &B);
-    append_type_name(&B, top+2, (const ctype_t*) lua_touserdata(L, top+1));
+    append_type_name(&B, top+2, (const struct ctype*) lua_touserdata(L, top+1));
 
     switch (ct->calling_convention) {
     case STD_CALL:
@@ -1134,7 +1134,7 @@ static void push_function_type_string(lua_State* L, int usr, const ctype_t* ct)
         lua_replace(L, top+1);
         lua_getuservalue(L, top+1);
         lua_replace(L, top+2);
-        append_type_name(&B, top+2, (const ctype_t*) lua_touserdata(L, top+1));
+        append_type_name(&B, top+2, (const struct ctype*) lua_touserdata(L, top+1));
     }
 
     luaL_addstring(&B, ")");
@@ -1147,7 +1147,7 @@ static void push_function_type_string(lua_State* L, int usr, const ctype_t* ct)
 /* parses from after the opening paranthesis to after the closing parenthesis
  * leaves the ctype usrvalue on the top of the stack
  */
-static void parse_function_arguments(lua_State* L, parser_t* P, ctype_t* ftype, int ret_usr, ctype_t* ret_type)
+static void parse_function_arguments(lua_State* L, struct parser* P, struct ctype* ftype, int ret_usr, struct ctype* ret_type)
 {
     token_t tok;
     int arg_idx = 1;
@@ -1169,7 +1169,7 @@ static void parse_function_arguments(lua_State* L, parser_t* P, ctype_t* ftype, 
     lua_rawseti(L, func_usr, 0);
 
     for (;;) {
-        ctype_t arg_type;
+        struct ctype arg_type;
 
         assert(lua_gettop(L) == top + 1);
 
@@ -1285,7 +1285,7 @@ static int max_bitfield_size(int type)
  *
  * pushes the updated user value on the top of the stack
  */
-const char* parse_argument(lua_State* L, parser_t* P, int ct_usr, ctype_t* type, size_t* namesz)
+const char* parse_argument(lua_State* L, struct parser* P, int ct_usr, struct ctype* type, size_t* namesz)
 {
     token_t tok;
     const char* name = NULL;
@@ -1315,7 +1315,7 @@ const char* parse_argument(lua_State* L, parser_t* P, int ct_usr, ctype_t* type,
         } else if (tok.type == TOK_OPEN_PAREN) {
             /* we have a function pointer or a function */
 
-            ctype_t ret_type = *type;
+            struct ctype ret_type = *type;
 
             memset(type, 0, sizeof(*type));
             type->base_size = sizeof(void (*)());
@@ -1491,16 +1491,16 @@ const char* parse_argument(lua_State* L, parser_t* P, int ct_usr, ctype_t* type,
     return name;
 }
 
-static void parse_typedef(lua_State* L, parser_t* P)
+static void parse_typedef(lua_State* L, struct parser* P)
 {
     token_t tok;
-    ctype_t base_type;
+    struct ctype base_type;
     int top = lua_gettop(L);
 
     parse_type(L, P, &base_type);
 
     for (;;) {
-        ctype_t arg_type = base_type;
+        struct ctype arg_type = base_type;
         const char* name;
         size_t namesz;
 
@@ -1535,7 +1535,7 @@ static void parse_typedef(lua_State* L, parser_t* P)
 #define END 0
 #define PRAGMA_POP 1
 
-static int parse_root(lua_State* L, parser_t* P)
+static int parse_root(lua_State* L, struct parser* P)
 {
     int top = lua_gettop(L);
     token_t tok;
@@ -1627,7 +1627,7 @@ static int parse_root(lua_State* L, parser_t* P)
 
         } else {
             /* type declaration, type definition, or function declaration */
-            ctype_t type;
+            struct ctype type;
             const char* name;
             size_t namesz;
 
@@ -1662,7 +1662,7 @@ static int parse_root(lua_State* L, parser_t* P)
 
 int ffi_cdef(lua_State* L)
 {
-    parser_t P;
+    struct parser P;
 
     P.line = 1;
     P.prev = P.next = luaL_checkstring(L, 1);
@@ -1681,7 +1681,7 @@ int ffi_cdef(lua_State* L)
  */
 
 /* () */
-static int64_t calculate_constant1(lua_State* L, parser_t* P, token_t* tok)
+static int64_t calculate_constant1(lua_State* L, struct parser* P, token_t* tok)
 {
     int64_t ret;
 
@@ -1722,7 +1722,7 @@ static int64_t calculate_constant1(lua_State* L, parser_t* P, token_t* tok)
 }
 
 /* ! and ~, unary + and -, and sizeof */
-static int64_t calculate_constant2(lua_State* L, parser_t* P, token_t* tok)
+static int64_t calculate_constant2(lua_State* L, struct parser* P, token_t* tok)
 {
     if (tok->type == TOK_LOGICAL_NOT) {
         require_token(L, P, tok);
@@ -1741,7 +1741,7 @@ static int64_t calculate_constant2(lua_State* L, parser_t* P, token_t* tok)
         return -calculate_constant2(L, P, tok);
 
     } else if (tok->type == TOK_TOKEN && IS_LITERAL(*tok, "sizeof")) {
-        ctype_t type;
+        struct ctype type;
 
         require_token(L, P, tok);
         if (tok->type != TOK_OPEN_PAREN) {
@@ -1767,7 +1767,7 @@ static int64_t calculate_constant2(lua_State* L, parser_t* P, token_t* tok)
 }
 
 /* binary * / and % (left associative) */
-static int64_t calculate_constant3(lua_State* L, parser_t* P, token_t* tok)
+static int64_t calculate_constant3(lua_State* L, struct parser* P, token_t* tok)
 {
     int64_t left = calculate_constant2(L, P, tok);
 
@@ -1791,7 +1791,7 @@ static int64_t calculate_constant3(lua_State* L, parser_t* P, token_t* tok)
 }
 
 /* binary + and - (left associative) */
-static int64_t calculate_constant4(lua_State* L, parser_t* P, token_t* tok)
+static int64_t calculate_constant4(lua_State* L, struct parser* P, token_t* tok)
 {
     int64_t left = calculate_constant3(L, P, tok);
 
@@ -1811,7 +1811,7 @@ static int64_t calculate_constant4(lua_State* L, parser_t* P, token_t* tok)
 }
 
 /* binary << and >> (left associative) */
-static int64_t calculate_constant5(lua_State* L, parser_t* P, token_t* tok)
+static int64_t calculate_constant5(lua_State* L, struct parser* P, token_t* tok)
 {
     int64_t left = calculate_constant4(L, P, tok);
 
@@ -1831,7 +1831,7 @@ static int64_t calculate_constant5(lua_State* L, parser_t* P, token_t* tok)
 }
 
 /* binary <, <=, >, and >= (left associative) */
-static int64_t calculate_constant6(lua_State* L, parser_t* P, token_t* tok)
+static int64_t calculate_constant6(lua_State* L, struct parser* P, token_t* tok)
 {
     int64_t left = calculate_constant5(L, P, tok);
 
@@ -1859,7 +1859,7 @@ static int64_t calculate_constant6(lua_State* L, parser_t* P, token_t* tok)
 }
 
 /* binary ==, != (left associative) */
-static int64_t calculate_constant7(lua_State* L, parser_t* P, token_t* tok)
+static int64_t calculate_constant7(lua_State* L, struct parser* P, token_t* tok)
 {
     int64_t left = calculate_constant6(L, P, tok);
 
@@ -1879,7 +1879,7 @@ static int64_t calculate_constant7(lua_State* L, parser_t* P, token_t* tok)
 }
 
 /* binary & (left associative) */
-static int64_t calculate_constant8(lua_State* L, parser_t* P, token_t* tok)
+static int64_t calculate_constant8(lua_State* L, struct parser* P, token_t* tok)
 {
     int64_t left = calculate_constant7(L, P, tok);
 
@@ -1895,7 +1895,7 @@ static int64_t calculate_constant8(lua_State* L, parser_t* P, token_t* tok)
 }
 
 /* binary ^ (left associative) */
-static int64_t calculate_constant9(lua_State* L, parser_t* P, token_t* tok)
+static int64_t calculate_constant9(lua_State* L, struct parser* P, token_t* tok)
 {
     int64_t left = calculate_constant8(L, P, tok);
 
@@ -1911,7 +1911,7 @@ static int64_t calculate_constant9(lua_State* L, parser_t* P, token_t* tok)
 }
 
 /* binary | (left associative) */
-static int64_t calculate_constant10(lua_State* L, parser_t* P, token_t* tok)
+static int64_t calculate_constant10(lua_State* L, struct parser* P, token_t* tok)
 {
     int64_t left = calculate_constant9(L, P, tok);
 
@@ -1927,7 +1927,7 @@ static int64_t calculate_constant10(lua_State* L, parser_t* P, token_t* tok)
 }
 
 /* binary && (left associative) */
-static int64_t calculate_constant11(lua_State* L, parser_t* P, token_t* tok)
+static int64_t calculate_constant11(lua_State* L, struct parser* P, token_t* tok)
 {
     int64_t left = calculate_constant10(L, P, tok);
 
@@ -1943,7 +1943,7 @@ static int64_t calculate_constant11(lua_State* L, parser_t* P, token_t* tok)
 }
 
 /* binary || (left associative) */
-static int64_t calculate_constant12(lua_State* L, parser_t* P, token_t* tok)
+static int64_t calculate_constant12(lua_State* L, struct parser* P, token_t* tok)
 {
     int64_t left = calculate_constant11(L, P, tok);
 
@@ -1959,7 +1959,7 @@ static int64_t calculate_constant12(lua_State* L, parser_t* P, token_t* tok)
 }
 
 /* ternary ?: (right associative) */
-static int64_t calculate_constant13(lua_State* L, parser_t* P, token_t* tok)
+static int64_t calculate_constant13(lua_State* L, struct parser* P, token_t* tok)
 {
     int64_t middle, right;
     int64_t left = calculate_constant12(L, P, tok);
@@ -1975,7 +1975,7 @@ static int64_t calculate_constant13(lua_State* L, parser_t* P, token_t* tok)
     }
 }
 
-int64_t calculate_constant(lua_State* L, parser_t* P)
+int64_t calculate_constant(lua_State* L, struct parser* P)
 {
     token_t tok;
     int64_t ret;

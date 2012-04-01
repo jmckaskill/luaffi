@@ -7,8 +7,8 @@ typedef struct jit_header_t jit_header_t;
 
 static function_t compile(Dst_DECL, lua_State* L, function_t func, int ref);
 
-static void* reserve_code(jit_t* jit, lua_State* L, size_t sz);
-static void commit_code(jit_t* jit, void* p, size_t sz);
+static void* reserve_code(struct jit* jit, lua_State* L, size_t sz);
+static void commit_code(struct jit* jit, void* p, size_t sz);
 
 static void push_int(lua_State* L, int val)
 { lua_pushnumber(L, val); }
@@ -67,7 +67,7 @@ struct jit_header_t {
 
 #define LINKTABLE_MAX_SIZE (sizeof(extnames) / sizeof(extnames[0]) * (JUMP_SIZE))
 
-static function_t compile(jit_t* jit, lua_State* L, function_t func, int ref)
+static function_t compile(struct jit* jit, lua_State* L, function_t func, int ref)
 {
     jit_header_t* code;
     size_t codesz;
@@ -99,9 +99,9 @@ static function_t compile(jit_t* jit, lua_State* L, function_t func, int ref)
 
 typedef uint8_t jump_t[JUMP_SIZE];
 
-int get_extern(jit_t* jit, uint8_t* addr, int idx, int type)
+int get_extern(struct jit* jit, uint8_t* addr, int idx, int type)
 {
-    page_t* page = jit->pages[jit->pagenum-1];
+    struct page* page = jit->pages[jit->pagenum-1];
     jump_t* jumps = (jump_t*) (page+1);
     jit_header_t* h = (jit_header_t*) ((uint8_t*) page + page->off);
     uint8_t* jmp;
@@ -128,9 +128,9 @@ int get_extern(jit_t* jit, uint8_t* addr, int idx, int type)
     }
 }
 
-static void* reserve_code(jit_t* jit, lua_State* L, size_t sz)
+static void* reserve_code(struct jit* jit, lua_State* L, size_t sz)
 {
-    page_t* page;
+    struct page* page;
     size_t off = (jit->pagenum > 0) ? jit->pages[jit->pagenum-1]->off : 0;
     size_t size = (jit->pagenum > 0) ? jit->pages[jit->pagenum-1]->size : 0;
 
@@ -140,15 +140,15 @@ static void* reserve_code(jit_t* jit, lua_State* L, size_t sz)
         function_t func;
 
         /* need to create a new page */
-        jit->pages = (page_t**) realloc(jit->pages, (++jit->pagenum) * sizeof(jit->pages[0]));
+        jit->pages = (struct page**) realloc(jit->pages, (++jit->pagenum) * sizeof(jit->pages[0]));
 
-        size = ALIGN_UP(sz + LINKTABLE_MAX_SIZE + sizeof(page_t), jit->align_page_size);
+        size = ALIGN_UP(sz + LINKTABLE_MAX_SIZE + sizeof(struct page), jit->align_page_size);
 
-        page = (page_t*) AllocPage(size);
+        page = (struct page*) AllocPage(size);
         jit->pages[jit->pagenum-1] = page;
         pdata = (uint8_t*) page;
         page->size = size;
-        page->off = sizeof(page_t);
+        page->off = sizeof(struct page);
 
         lua_newtable(L);
 
@@ -224,9 +224,9 @@ static void* reserve_code(jit_t* jit, lua_State* L, size_t sz)
     return (uint8_t*) page + page->off;
 }
 
-static void commit_code(jit_t* jit, void* code, size_t sz)
+static void commit_code(struct jit* jit, void* code, size_t sz)
 {
-    page_t* page = jit->pages[jit->pagenum-1];
+    struct page* page = jit->pages[jit->pagenum-1];
     page->off += sz;
     EnableExecute(page, page->size);
     {
@@ -238,12 +238,12 @@ static void commit_code(jit_t* jit, void* code, size_t sz)
     }
 }
 
-void free_code(jit_t* jit, lua_State* L, function_t func)
+void free_code(struct jit* jit, lua_State* L, function_t func)
 {
     size_t i;
     jit_header_t* h = ((jit_header_t*) func) - 1;
     for (i = 0; i < jit->pagenum; i++) {
-        page_t* p = jit->pages[i];
+        struct page* p = jit->pages[i];
 
         if ((uint8_t*) h < (uint8_t*) p || (uint8_t*) p + p->size <= (uint8_t*) h) {
             continue;
