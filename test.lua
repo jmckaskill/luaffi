@@ -30,6 +30,8 @@ int64_t add_i64(int64_t a, int64_t b);
 uint64_t add_u64(uint64_t a, uint64_t b);
 double add_d(double a, double b);
 float add_f(float a, float b);
+bool ret_b(bool v);
+_Bool ret_b2(_Bool v);
 
 int print_i8(char* buf, int8_t val);
 int print_u8(char* buf, uint8_t val);
@@ -40,6 +42,8 @@ int print_u32(char* buf, uint32_t val);
 int print_i64(char* buf, int64_t val);
 int print_u64(char* buf, uint64_t val);
 int print_s(char* buf, const char* val);
+int print_b(char* buf, bool val);
+int print_b2(char* buf, _Bool val);
 int print_d(char* buf, double val);
 int print_f(char* buf, float val);
 int print_p(char* buf, void* val);
@@ -160,6 +164,8 @@ local test_values = {
     uint16_t = 65000,
     uint32_t = 700000056,
     uint64_t = 12345678901234,
+    bool = true,
+    _Bool = false,
 }
 
 local buf = ffi.new('char[256]')
@@ -182,10 +188,12 @@ for convention,c in pairs(dlls) do
     check(c.add_i16(2000,4000), 6000)
     check(c.add_d(20, 12), 32)
     check(c.add_f(40, 32), 72)
+    check(c.ret_b(true), false)
+    check(c.ret_b2(false), true)
 
-    for suffix, type in pairs{d = 'double', f = 'float', u64 = 'uint64_t', u32 = 'uint32_t', u16 = 'uint16_t', s = 'const char*', p = 'void*'} do
+    for suffix, type in pairs{b = 'bool', b2 = '_Bool', d = 'double', f = 'float', u64 = 'uint64_t', u32 = 'uint32_t', u16 = 'uint16_t', s = 'const char*', p = 'void*'} do
         local test = test_values[type]
-        --print('checkbuf', suffix, type, buf)
+        --print('checkbuf', suffix, type, buf, test)
         checkbuf(type, suffix, c['print_' .. suffix](buf, test))
 
         if first then
@@ -232,6 +240,7 @@ for convention,c in pairs(dlls) do
     float call_f(float (*__cdecl func)(float), float arg);
     double call_d(double (*__cdecl func)(double), double arg);
     const char* call_s(sfunc func, const char* arg);
+    _Bool call_b(_Bool (*__cdecl func)(_Bool), _Bool arg);
     ]]
 
     ffi.cdef(cbs:gsub('__cdecl', convention))
@@ -241,6 +250,7 @@ for convention,c in pairs(dlls) do
     assert(math.abs(c.call_d(function(a) return 2*a end, 3.2) - 6.4) < 0.0000000001)
     assert(math.abs(c.call_f(function(a) return 2*a end, 3.2) - 6.4) < 0.000001)
     check(ffi.string(c.call_s(function(s) return s + u3 end, 'foobar')), 'bar')
+    check(c.call_b(function(v) return not v end, true), false)
 
     local u2 = ffi.new('uint64_t', 2)
     local cb = ffi.new('sfunc', function(s) return s + u3 end)

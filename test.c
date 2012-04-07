@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <inttypes.h>
 #include <stddef.h>
+#include <stdbool.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -41,6 +42,12 @@ ADD(uint64_t, add_u64)
 ADD(double, add_d)
 ADD(float, add_f)
 
+EXPORT _Bool ret_b(_Bool v);
+EXPORT _Bool ret_b2(_Bool v);
+
+_Bool ret_b(_Bool v) {return !v;}
+_Bool ret_b2(_Bool v) {return !v;}
+
 #define PRINT(TYPE, NAME, FORMAT) \
     EXPORT int NAME(char* buf, TYPE val); \
     int NAME(char* buf, TYPE val) {return sprintf(buf, "%" FORMAT, val);}
@@ -58,24 +65,31 @@ PRINT(float, print_f, "g")
 PRINT(const char*, print_s, "s")
 PRINT(void*, print_p, "p")
 
-#define ALIGN_UP(TYPE, SUFFIX, FORMAT) \
-    struct align_##SUFFIX {         \
+EXPORT int print_b(char* buf, _Bool val);
+EXPORT int print_b2(char* buf, _Bool val);
+int print_b(char* buf, _Bool val) {return sprintf(buf, "%s", val ? "true" : "false");}
+int print_b2(char* buf, _Bool val) {return sprintf(buf, "%s", val ? "true" : "false");}
+
+#define ALIGN_UP(TYPE, ALIGNMENT, SUFFIX) \
+    struct align_##ALIGNMENT##_##SUFFIX {   \
         char pad;                   \
         TYPE v;                     \
     };                              \
-    EXPORT int print_align_##SUFFIX(char* buf, struct align_##SUFFIX* p);   \
-    EXPORT int print_align_##SUFFIX(char* buf, struct align_##SUFFIX* p) {  \
-        return sprintf(buf, "%" FORMAT, p->v);                              \
+    EXPORT int print_align_##ALIGNMENT##_##SUFFIX(char* buf, struct align_##ALIGNMENT##_##SUFFIX* p);   \
+    int print_align_##ALIGNMENT##_##SUFFIX(char* buf, struct align_##ALIGNMENT##_##SUFFIX* p) { \
+        return print_##SUFFIX(buf, p->v);                                   \
     }
 
-#define ALIGN2(A)                       \
-    ALIGN_UP(uint16_t, A##_u16, PRIu16)    \
-    ALIGN_UP(uint32_t, A##_u32, PRIu32)    \
-    ALIGN_UP(uint64_t, A##_u64, PRIu64)    \
-    ALIGN_UP(float, A##_f, "g")            \
-    ALIGN_UP(double, A##_d, "g")           \
-    ALIGN_UP(const char*, A##_s, "s")      \
-    ALIGN_UP(void*, A##_p, "p")
+#define ALIGN2(ALIGNMENT)                   \
+    ALIGN_UP(uint16_t, ALIGNMENT, u16)      \
+    ALIGN_UP(uint32_t, ALIGNMENT, u32)      \
+    ALIGN_UP(uint64_t, ALIGNMENT, u64)      \
+    ALIGN_UP(float, ALIGNMENT, f)           \
+    ALIGN_UP(double, ALIGNMENT, d)          \
+    ALIGN_UP(const char*, ALIGNMENT, s)     \
+    ALIGN_UP(void*, ALIGNMENT, p)           \
+    ALIGN_UP(_Bool, ALIGNMENT, b)           \
+    ALIGN_UP(_Bool, ALIGNMENT, b2)          \
 
 ALIGN2(0)
 
@@ -250,6 +264,7 @@ CALL(int, i)
 CALL(float, f)
 CALL(double, d)
 CALL(const char*, s)
+CALL(_Bool, b)
 
 struct fptr {
 #ifdef _MSC_VER

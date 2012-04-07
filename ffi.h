@@ -363,6 +363,7 @@ void compile_globals(struct jit* jit, lua_State* L);
 int get_extern(struct jit* jit, uint8_t* addr, int idx, int type);
 
 /* WARNING: assembly needs to be updated for prototype changes of these functions */
+int to_bool(lua_State* L, int idx);
 double to_double(lua_State* L, int idx);
 float to_float(lua_State* L, int idx);
 uint64_t to_uint64(lua_State* L, int idx);

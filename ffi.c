@@ -2424,6 +2424,8 @@ static int setup_upvals(lua_State* L)
 
     /* setup builtin typedefs */
     {
+        add_typedef(L, "bool", "_Bool");
+
         if (sizeof(uint32_t) == sizeof(size_t)) {
             add_typedef(L, "uint32_t", "size_t");
             add_typedef(L, "int32_t", "ssize_t");

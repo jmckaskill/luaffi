@@ -1013,6 +1013,15 @@ void compile_function(lua_State* L, cfunction func, int ct_usr, const struct cty
                 lua_pop(L, 1);
                 break;
 
+            case BOOL_TYPE:
+                | call_rr extern to_int32, L_ARG, i
+                | cmp eax, 0
+                | setne al
+                | movzx eax, al
+                add_int(Dst, ct, &reg, 0);
+                lua_pop(L, 1);
+                break;
+
             case INT32_TYPE:
                 | call_rr extern to_int32, L_ARG, i
                 add_int(Dst, ct, &reg, 0);
