@@ -250,6 +250,7 @@ enum {
 };
 
 enum {
+    INVALID_TYPE,
     VOID_TYPE,
     DOUBLE_TYPE,
     FLOAT_TYPE,
@@ -348,6 +349,8 @@ size_t ctype_size(lua_State* L, const struct ctype* ct);
 int parse_type(lua_State* L, struct parser* P, struct ctype* type);
 const char* parse_argument(lua_State* L, struct parser* P, int ct_usr, struct ctype* type, size_t* namesz);
 void push_type_name(lua_State* L, int usr, const struct ctype* ct);
+
+int push_user_mt(lua_State* L, int ct_usr, const struct ctype* ct);
 
 int ffi_cdef(lua_State* L);
 

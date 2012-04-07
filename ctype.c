@@ -199,18 +199,23 @@ err:
     luaL_error(L, "expected cdata, ctype or string for arg #%d", idx);
 }
 
-/* to_cdata returns the struct cdata* and pushes the user value onto the stack
- * if the idx is a cdata, otherwise returns NULL and pushes nothing. Also
- * dereferences references */
+/* to_cdata returns the struct cdata* and pushes the user value onto the
+ * stack. If the index is not a ctype then ct is not touched, a nil is pushed,
+ * NULL is returned, and ct->type is set to INVALID_TYPE.  Also dereferences
+ * references */
 void* to_cdata(lua_State* L, int idx, struct ctype* ct)
 {
     struct cdata* cd;
 
+    ct->type = INVALID_TYPE;
     if (!lua_getmetatable(L, idx)) {
+        lua_pushnil(L);
         return NULL;
     }
 
     if (!equals_upval(L, -1, &cdata_mt_key)) {
+        lua_pop(L, 1); /* mt */
+        lua_pushnil(L);
         return NULL;
     }
 
@@ -236,7 +241,7 @@ void* to_cdata(lua_State* L, int idx, struct ctype* ct)
 void* check_cdata(lua_State* L, int idx, struct ctype* ct)
 {
     void* p = to_cdata(L, idx, ct);
-    if (!p) {
+    if (ct->type == INVALID_TYPE) {
         luaL_error(L, "expected cdata for arg #%d", idx);
     }
     return p;

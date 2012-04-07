@@ -165,7 +165,7 @@ local test_values = {
 local buf = ffi.new('char[256]')
 
 local function checkbuf(type, suffix, ret)
-    local str = tostring(test_values[type]):gsub('^cdata: ([^,]*), .*', '%1')
+    local str = tostring(test_values[type]):gsub('^cdata%b<>: ', '')
     check(ffi.string(buf), str)
     check(ret, #str)
 end
@@ -307,6 +307,73 @@ ffi.new('struct {const char* foo;}', {'foo'})
 assert(not pcall(function()
     ffi.new('struct {char* foo;}', {'ff'})
 end))
+
+local mt = {}
+local vls = ffi.new(ffi.metatype('struct vls', mt), 1)
+
+assert(not pcall(function() return vls.key end))
+
+mt.__index = function(vls, key)
+    return function(vls, a, b)
+        return 'in index ' .. key .. ' ' .. vls.d.a .. ' ' .. a .. ' ' .. b
+    end
+end
+
+vls.d.a = 3
+check(vls:key('a', 'b'), 'in index key 3 a b')
+
+assert(not pcall(function() vls.k = 3 end))
+
+mt.__newindex = function(vls, key, val)
+    error('in newindex ' .. key .. ' ' .. vls.d.a .. ' ' .. val, 0)
+end
+
+vls.d.a = 4
+local suc, err = pcall(function() vls.key = 'val' end)
+assert(not suc)
+check(err, 'in newindex key 4 val')
+
+local u64 = ffi.typeof('uint64_t')
+
+mt.__add = function(vls, a) return vls.d.a + a end
+mt.__sub = function(vls, a) return vls.d.a - a end
+mt.__mul = function(vls, a) return vls.d.a * a end
+mt.__div = function(vls, a) return vls.d.a / a end
+mt.__mod = function(vls, a) return vls.d.a % a end
+mt.__pow = function(vls, a) return vls.d.a ^ a end
+mt.__eq = function(vls, a) return u64(vls.d.a) == a end
+mt.__lt = function(vls, a) return u64(vls.d.a) < a end
+mt.__le = function(vls, a) return u64(vls.d.a) <= a end
+mt.__call = function(vls, a, b) return '__call', vls.d.a .. a .. (b or 'nil')  end
+mt.__unm = function(vls) return -vls.d.a end
+mt.__concat = function(vls, a) return vls.d.a .. a end
+mt.__len = function(vls) return vls.d.a end
+
+vls.d.a = 5
+check(vls + 5, 10)
+check(vls - 5, 0)
+check(vls * 5, 25)
+check(vls / 5, 1)
+check(vls % 3, 2)
+check(vls ^ 3, 125)
+check(vls == u64(4), false)
+check(vls == u64(5), true)
+check(vls == u64(6), false)
+check(vls < u64(4), false)
+check(vls < u64(5), false)
+check(vls < u64(6), true)
+check(vls <= u64(4), false)
+check(vls <= u64(5), true)
+check(vls <= u64(6), true)
+check(-vls, -5)
+local a,b = vls('6')
+check(a, '__call')
+check(b, '56nil')
+
+if _VERSION ~= 'Lua 5.1' then
+    check(vls .. 'str', '5str')
+    check(#vls, 5)
+end
 
 print('Test PASSED')
 

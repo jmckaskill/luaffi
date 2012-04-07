@@ -65,8 +65,9 @@ static int type_error(lua_State* L, int idx, const char* to_type, int to_usr, co
     idx = lua_absindex(L, idx);
 
     luaL_buffinit(L, &B);
+    to_cdata(L, idx, &ft);
 
-    if (to_cdata(L, idx, &ft)) {
+    if (ft.type != INVALID_TYPE) {
         push_type_name(L, -1, &ft);
         lua_pushfstring(L, "unable to convert argument %d from cdata<%s> to cdata<", idx, lua_tostring(L, -1));
         lua_remove(L, -2);
@@ -117,7 +118,7 @@ static int type_error(lua_State* L, int idx, const char* to_type, int to_usr, co
     case LUA_TUSERDATA:                                                     \
         p = to_cdata(L, idx, &ct);                                          \
                                                                             \
-        if (!p) {                                                           \
+        if (ct.type == INVALID_TYPE) {                                      \
             if (ALLOW_POINTERS) {                                           \
                 return (TYPE) (intptr_t) p;                                 \
             } else {                                                        \
@@ -200,7 +201,7 @@ static size_t unpack_vararg(lua_State* L, int i, char* to)
     case LUA_TUSERDATA:
         p = to_cdata(L, i, &ct);
 
-        if (!p) {
+        if (ct.type == INVALID_TYPE) {
             *(void**) to = p;
             return sizeof(void*);
         }
@@ -366,7 +367,7 @@ static void* to_pointer(lua_State* L, int idx, struct ctype* ct)
     case LUA_TUSERDATA:
         p = to_cdata(L, idx, ct);
 
-        if (!p) {
+        if (ct->type == INVALID_TYPE) {
             /* some other type of user data */
             ct->type = VOID_TYPE;
             lua_pushnil(L);
@@ -492,7 +493,7 @@ static cfunction to_cfunction(lua_State* L, int idx, int to_usr, const struct ct
         p = to_cdata(L, idx, &ft);
         assert(lua_gettop(L) == top + 1);
 
-        if (!p) {
+        if (ft.type == INVALID_TYPE) {
             if (check_pointers) {
                 goto err;
             } else {
@@ -624,28 +625,21 @@ err:
 }
 
 /* pops the member key from the stack, leaves the member user value on the
- * stack. Returns the member offset. */
-static size_t get_member(lua_State* L, int usr, const struct ctype* ct, struct ctype* mt)
+ * stack. Returns the member offset. Returns -ve if the member can not be
+ * found. */
+static int get_member(lua_State* L, int usr, const struct ctype* ct, struct ctype* mt)
 {
-    size_t off;
-    usr = lua_absindex(L, usr);
-    /* push a copy of the key value for the error */
-    lua_pushvalue(L, -1);
+    int off;
     lua_rawget(L, usr);
 
     if (lua_isnil(L, -1)) {
-        push_type_name(L, usr, ct);
-        luaL_error(L, "type %s does not have member %s", lua_tostring(L, -1), lua_tostring(L, -3));
+        lua_pop(L, 1);
+        return -1;
     }
-
-    /* remove the extra key value */
-    lua_remove(L, -2);
 
     *mt = *(const struct ctype*) lua_touserdata(L, -1);
     lua_getuservalue(L, -1);
-
-    /* remove the type value */
-    lua_remove(L, -2);
+    lua_replace(L, -2);
 
     if (mt->is_variable_array) {
         /* eg char mbr[?] */
@@ -688,7 +682,7 @@ static void set_struct(lua_State* L, int idx, void* to, int to_usr, const struct
         memset(to, 0, ctype_size(L, tt));
         lua_pushnil(L);
         while (lua_next(L, idx)) {
-            size_t off;
+            int off;
 
             if (!have_first && lua_tonumber(L, -2) == 1 && lua_tonumber(L, -1) != 0) {
                 have_first = 1;
@@ -698,6 +692,7 @@ static void set_struct(lua_State* L, int idx, void* to, int to_usr, const struct
 
             lua_pushvalue(L, -2);
             off = get_member(L, to_usr, tt, &mt);
+            assert(off >= 0);
             set_value(L, -2, (char*) to + off, -1, &mt, check_pointers);
 
             /* initializer value, mt usr */
@@ -706,18 +701,20 @@ static void set_struct(lua_State* L, int idx, void* to, int to_usr, const struct
 
         /* if we only had a single non zero value then initialize all members to that value */
         if (!have_other && have_first && tt->type != UNION_TYPE) {
-            size_t i, sz, off;
+            size_t i, sz;
+            int off;
             lua_rawgeti(L, idx, 1);
             sz = lua_rawlen(L, to_usr);
 
             for (i = 2; i < sz; i++) {
                 lua_pushnumber(L, i);
                 off = get_member(L, to_usr, tt, &mt);
+                assert(off >= 0);
                 set_value(L, -2, (char*) to + off, -1, &mt, check_pointers);
                 lua_pop(L, 1); /* mt usr */
             }
 
-            lua_pop(L, 1);
+            lua_pop(L, 1); /* initializer table */
         }
         break;
 
@@ -934,6 +931,19 @@ static int do_new(lua_State* L, int is_cast)
 
     p = push_cdata(L, -1, &ct);
 
+    /* if the user mt has a __gc function then call ffi.gc on this value */
+    if (push_user_mt(L, -2, &ct)) {
+        push_upval(L, &gc_key);
+        lua_pushvalue(L, -3);
+
+        /* user_mt.__gc */
+        lua_pushliteral(L, "__gc");
+        lua_rawget(L, -4);
+
+        lua_rawset(L, -3); /* gc_upval[cdata] = user_mt.__gc */
+        lua_pop(L, 2); /* user_mt and gc_upval */
+    }
+
     if (!lua_isnil(L, 2)) {
         set_value(L, 2, p, -2, &ct, check_ptrs);
     }
@@ -967,20 +977,25 @@ static int ffi_alignof(lua_State* L)
 static int ffi_offsetof(lua_State* L)
 {
     size_t off;
-    struct ctype ct, mbr;
-    setmintop(L, 2);
+    struct ctype ct, mt;
+    lua_settop(L, 2);
     check_ctype(L, 1, &ct);
 
     lua_pushvalue(L, 2);
-    off = get_member(L, -2, &ct, &mbr);
+    off = get_member(L, -2, &ct, &mt); /* this replaces the member key at -1 with the mbr usr value */
+    if (off < 0) {
+        push_type_name(L, 3, &ct);
+        return luaL_error(L, "type %s has no member %s", lua_tostring(L, -1), lua_tostring(L, 2));
+    }
+
     lua_pushnumber(L, off);
 
-    if (!mbr.is_bitfield) {
+    if (!mt.is_bitfield) {
         return 1;
     }
 
-    lua_pushnumber(L, mbr.bit_offset);
-    lua_pushnumber(L, mbr.bit_size);
+    lua_pushnumber(L, mt.bit_offset);
+    lua_pushnumber(L, mt.bit_size);
     return 3;
 }
 
@@ -988,8 +1003,9 @@ static int ffi_istype(lua_State* L)
 {
     struct ctype tt, ft;
     check_ctype(L, 1, &tt);
+    to_cdata(L, 2, &ft);
 
-    if (!to_cdata(L, 2, &ft)) {
+    if (ft.type == INVALID_TYPE) {
         goto fail;
     }
 
@@ -1090,6 +1106,17 @@ static int cdata_call(lua_State* L)
     int top = lua_gettop(L);
     cfunction* p = (cfunction*) check_cdata(L, 1, &ct);
 
+    if (push_user_mt(L, -1, &ct)) {
+        lua_pushliteral(L, "__call");
+        lua_rawget(L, -2);
+
+        if (!lua_isnil(L, -1)) {
+            lua_insert(L, 1);
+            lua_pop(L, 2); /* ct_usr, user_mt */
+            lua_call(L, lua_gettop(L) - 1, LUA_MULTRET);
+            return lua_gettop(L);
+        }
+    }
     if (ct.pointers || ct.type != FUNCTION_TYPE) {
         return luaL_error(L, "only function callbacks are callable");
     }
@@ -1120,6 +1147,47 @@ static int cdata_call(lua_State* L)
     return lua_gettop(L);
 }
 
+static int user_mt_key;
+
+static int ffi_metatype(lua_State* L)
+{
+    struct ctype ct;
+    lua_settop(L, 2);
+
+    check_ctype(L, 1, &ct);
+    if (lua_type(L, 2) != LUA_TTABLE && lua_type(L, 2) != LUA_TNIL) {
+        return luaL_argerror(L, 2, "metatable must be a table or nil");
+    }
+
+    lua_pushlightuserdata(L, &user_mt_key);
+    lua_pushvalue(L, 2);
+    lua_rawset(L, 3); /* user[user_mt_key] = mt */
+
+    /* return the passed in ctype */
+    push_ctype(L, 3, &ct);
+    return 1;
+}
+
+/* push_user_mt returns 1 if the type has a user metatable and pushes it onto
+ * the stack, otherwise it returns 0 and pushes nothing */
+int push_user_mt(lua_State* L, int ct_usr, const struct ctype* ct)
+{
+    if (ct->pointers || (ct->type != STRUCT_TYPE && ct->type != UNION_TYPE)) {
+        return 0;
+    }
+
+    ct_usr = lua_absindex(L, ct_usr);
+    lua_pushlightuserdata(L, &user_mt_key);
+    lua_rawget(L, ct_usr);
+
+    if (lua_isnil(L, -1)) {
+        lua_pop(L, 1);
+        return 0;
+    }
+
+    return 1;
+}
+
 static int ffi_gc(lua_State* L)
 {
     struct ctype ct;
@@ -1136,71 +1204,104 @@ static int ffi_gc(lua_State* L)
     return 1;
 }
 
-/* pushes a variable number of items onto the stack
- * the user value of the returned type is at the top of the stack
- * errors if the member isn't found or when the key type is incorrect
- * for the type of data
+/* lookup_cdata_index returns the offset of the found type and user value on
+ * the stack if valid. Otherwise returns -ve and doesn't touch the stack.
  */
-static char* lookup_cdata_index(lua_State* L, char* data, struct ctype* type)
+static int lookup_cdata_index(lua_State* L, int idx, int ct_usr, struct ctype* ct)
 {
-    struct ctype mtype;
+    struct ctype mt;
+    int off;
 
-    switch (lua_type(L, 2)) {
+    ct_usr = lua_absindex(L, ct_usr);
+
+    switch (lua_type(L, idx)) {
     case LUA_TNUMBER:
         /* possibilities are array, pointer */
 
-        if (!type->pointers || is_void_ptr(type)) {
-            luaL_error(L, "can't deref a non-pointer type");
+        if (!ct->pointers || is_void_ptr(ct)) {
+            return -1;
         }
 
-        type->is_array = 0;
-        type->pointers--;
-        type->const_mask >>= 1;
+        ct->is_array = 0;
+        ct->pointers--;
+        ct->const_mask >>= 1;
 
-        lua_getuservalue(L, 1);
+        lua_pushvalue(L, ct_usr);
 
-        return data + (type->pointers ? sizeof(void*) : type->base_size) * (size_t) lua_tonumber(L, 2);
+        return (ct->pointers ? sizeof(void*) : ct->base_size) * (size_t) lua_tonumber(L, 2);
 
     case LUA_TSTRING:
         /* possibilities are struct/union, pointer to struct/union */
 
-        if ((type->type != STRUCT_TYPE && type->type != UNION_TYPE) || type->is_array || type->pointers > 1) {
-            luaL_error(L, "can't deref a non-struct type");
+        if ((ct->type != STRUCT_TYPE && ct->type != UNION_TYPE) || ct->is_array || ct->pointers > 1) {
+            return -1;
         }
 
-        lua_getuservalue(L, 1);
-        lua_pushvalue(L, 2);
+        lua_pushvalue(L, idx);
+        off = get_member(L, ct_usr, ct, &mt);
+        if (off < 0) {
+            return -1;
+        }
 
-        data += get_member(L, -2, type, &mtype);
-
-        *type = mtype;
-        return data;
+        *ct = mt;
+        return off;
 
     default:
-        luaL_error(L, "invalid key type %s", luaL_typename(L, 2));
-        return NULL;
+        return -1;
     }
 }
 
 static int cdata_newindex(lua_State* L)
 {
     struct ctype tt;
-    char* to = (char*) check_cdata(L, 1, &tt);
-    to = lookup_cdata_index(L, to, &tt);
+    char* to;
+    int off;
+
+    lua_settop(L, 3);
+
+    to = (char*) check_cdata(L, 1, &tt);
+    off = lookup_cdata_index(L, 2, -1, &tt);
+
+    if (off < 0) {
+        if (!push_user_mt(L, -1, &tt)) {
+            goto err;
+        }
+
+        lua_pushliteral(L, "__newindex");
+        lua_rawget(L, -2);
+
+        if (lua_isnil(L, -1)) {
+            goto err;
+        }
+
+        lua_insert(L, 1);
+        lua_settop(L, 4);
+        lua_call(L, 3, LUA_MULTRET);
+        return lua_gettop(L);
+    }
 
     if (tt.const_mask & 1) {
         return luaL_error(L, "can't set const data");
     }
 
-    set_value(L, 3, to, -1, &tt, 1);
+    set_value(L, 3, to + off, -1, &tt, 1);
     return 0;
+
+err:
+    push_type_name(L, 4, &tt);
+    return luaL_error(L, "type %s has no member %s", lua_tostring(L, -1), lua_tostring(L, 2));
 }
 
 static int cdata_index(lua_State* L)
 {
     void* to;
     struct ctype ct;
-    char* data = (char*) check_cdata(L, 1, &ct);
+    char* data;
+    int off;
+
+    lua_settop(L, 2);
+    data = (char*) check_cdata(L, 1, &ct);
+    assert(lua_gettop(L) == 3);
 
     /* Callbacks use the same metatable as standard cdata values, but have set
      * and free members. So instead of mt.__index = mt, we do the equiv here. */
@@ -1211,7 +1312,39 @@ static int cdata_index(lua_State* L)
         return 1;
     }
 
-    data = lookup_cdata_index(L, data, &ct);
+    off = lookup_cdata_index(L, 2, -1, &ct);
+
+    if (off < 0) {
+        assert(lua_gettop(L) == 3);
+        if (!push_user_mt(L, -1, &ct)) {
+            goto err;
+        }
+
+        lua_pushliteral(L, "__index");
+        lua_rawget(L, -2);
+
+        if (lua_isnil(L, -1)) {
+            goto err;
+        }
+
+        if (lua_istable(L, -1)) {
+            lua_pushvalue(L, 2);
+            lua_gettable(L, -2);
+            return 1;
+        }
+
+        lua_insert(L, 1);
+        lua_settop(L, 3);
+        lua_call(L, 2, LUA_MULTRET);
+        return lua_gettop(L);
+
+err:
+        push_type_name(L, 3, &ct);
+        return luaL_error(L, "type %s has no member %s", lua_tostring(L, -1), lua_tostring(L, 2));
+    }
+
+    assert(lua_gettop(L) == 4); /* ct, key, ct_usr, mbr_usr */
+    data += off;
 
     if (ct.is_array) {
         /* push a reference to the array */
@@ -1347,7 +1480,6 @@ static int64_t to_intptr(lua_State* L, int idx, struct ctype* ct)
 {
     void* p;
     int64_t ret;
-    int top = lua_gettop(L);
 
     switch (lua_type(L, idx)) {
     case LUA_TNUMBER:
@@ -1359,12 +1491,7 @@ static int64_t to_intptr(lua_State* L, int idx, struct ctype* ct)
         return ret;
 
     case LUA_TUSERDATA:
-        p = to_cdata(L, idx, ct);
-
-        /* p may be == NULL if it is a pointer type */
-        if (lua_gettop(L) == top) {
-            goto err;
-        }
+        p = check_cdata(L, idx, ct);
 
         if (ct->pointers) {
             return (intptr_t) p;
@@ -1415,13 +1542,136 @@ static void push_number(lua_State* L, int usr, const struct ctype* ct, int64_t v
     }
 }
 
+static int cdata_unm(lua_State* L)
+{
+    struct ctype ct;
+    void* to;
+    int64_t val;
+
+    lua_settop(L, 1);
+    to_cdata(L, 1, &ct);
+
+    if (push_user_mt(L, -1, &ct)) {
+        lua_pushliteral(L, "__unm");
+        lua_rawget(L, -2);
+
+        if (!lua_isnil(L, -1)) {
+            int top = lua_gettop(L);
+            lua_pushvalue(L, 1);
+            lua_call(L, 1, LUA_MULTRET);
+            return lua_gettop(L) - top + 1;
+        }
+    }
+
+    val = to_intptr(L, 1, &ct);
+
+    if (ct.pointers) {
+        luaL_error(L, "can't negate a pointer value");
+    } else {
+        lua_pushnil(L);
+        ct.type = INT64_TYPE;
+        ct.base_size = 8;
+        to = push_cdata(L, -1, &ct);
+        *(int64_t*) to = -val;
+    }
+
+    return 1;
+}
+
+/* returns -ve if no binop was called otherwise returns the number of return
+ * arguments */
+static int call_user_binop(lua_State* L, const char* opfield, int lidx, int ridx)
+{
+    struct ctype lt, rt;
+
+    lidx = lua_absindex(L, lidx);
+    ridx = lua_absindex(L, ridx);
+
+    to_cdata(L, lidx, &lt);
+    to_cdata(L, ridx, &rt);
+
+    push_type_name(L, -2, &lt);
+    lua_pop(L, 1);
+
+    if (push_user_mt(L, -2, &lt)) {
+        lua_pushstring(L, opfield);
+        lua_rawget(L, -2);
+
+        if (!lua_isnil(L, -1)) {
+            int top = lua_gettop(L);
+            lua_pushvalue(L, lidx);
+            lua_pushvalue(L, ridx);
+            lua_call(L, 2, LUA_MULTRET);
+            return lua_gettop(L) - top + 1;
+        }
+
+        lua_pop(L, 2); /* user_mt and user_mt.op */
+    }
+
+    if (push_user_mt(L, -1, &rt)) {
+        lua_pushstring(L, opfield);
+        lua_rawget(L, -2);
+
+        if (!lua_isnil(L, -1)) {
+            int top = lua_gettop(L);
+            lua_pushvalue(L, lidx);
+            lua_pushvalue(L, ridx);
+            lua_call(L, 2, LUA_MULTRET);
+            return lua_gettop(L) - top + 1;
+        }
+
+        lua_pop(L, 2); /* user_mt and user_mt.op */
+    }
+
+    lua_pop(L, 2); /* user values */
+    return -1;
+}
+
+static int cdata_concat(lua_State* L)
+{
+    int ret;
+
+    lua_settop(L, 2);
+
+    ret = call_user_binop(L, "__concat", 1, 2);
+    if (ret >= 0) {
+        return ret;
+    }
+
+    return luaL_error(L, "NYI");
+}
+
+static int cdata_len(lua_State* L)
+{
+    struct ctype ct;
+    int ret;
+
+    lua_settop(L, 2);
+
+    ret = call_user_binop(L, "__len", 1, 2);
+    if (ret >= 0) {
+        return ret;
+    }
+
+    check_cdata(L, 1, &ct);
+    push_type_name(L, -1, &ct);
+    return luaL_error(L, "type %s does not implement the __len metamethod", lua_tostring(L, -1));
+}
+
 static int cdata_add(lua_State* L)
 {
     struct ctype lt, rt;
     int64_t left, right, res;
     void* to;
+    int ret;
 
     lua_settop(L, 2);
+
+    ret = call_user_binop(L, "__add", 1, 2);
+    if (ret >= 0) {
+        return ret;
+    }
+
     left = to_intptr(L, 1, &lt);
     right = to_intptr(L, 2, &rt);
     assert(lua_gettop(L) == 4);
@@ -1461,8 +1711,15 @@ static int cdata_sub(lua_State* L)
     struct ctype lt, rt;
     int64_t left, right, res;
     void* to;
+    int ret;
 
     lua_settop(L, 2);
+
+    ret = call_user_binop(L, "__sub", 1, 2);
+    if (ret >= 0) {
+        return ret;
+    }
+
     left = to_intptr(L, 1, &lt);
     right = to_intptr(L, 2, &rt);
 
@@ -1488,11 +1745,18 @@ static int cdata_sub(lua_State* L)
 }
 
 /* TODO fix for unsigned */
-#define NUMBER_ONLY_BINOP(OP)                                               \
-    struct ctype lt, rt;                                                         \
+#define NUMBER_ONLY_BINOP(OP, OPSTR)                                        \
+    struct ctype lt, rt;                                                    \
     int64_t left, right, res;                                               \
+    int ret;                                                                \
                                                                             \
     lua_settop(L, 2);                                                       \
+                                                                            \
+    ret = call_user_binop(L, OPSTR, 1, 2);                                  \
+    if (ret >= 0) {                                                         \
+        return ret;                                                         \
+    }                                                                       \
+                                                                            \
     left = to_intptr(L, 1, &lt);                                            \
     right = to_intptr(L, 2, &rt);                                           \
     res = OP(left, right);                                                  \
@@ -1513,42 +1777,29 @@ static int cdata_sub(lua_State* L)
 #define POW(l,r) pow(l, r)
 
 static int cdata_mul(lua_State* L)
-{ NUMBER_ONLY_BINOP(MUL); }
+{ NUMBER_ONLY_BINOP(MUL, "__mul"); }
 
 static int cdata_div(lua_State* L)
-{ NUMBER_ONLY_BINOP(DIV); }
+{ NUMBER_ONLY_BINOP(DIV, "__div"); }
 
 static int cdata_mod(lua_State* L)
-{ NUMBER_ONLY_BINOP(MOD); }
+{ NUMBER_ONLY_BINOP(MOD, "__mod"); }
 
 static int cdata_pow(lua_State* L)
-{ NUMBER_ONLY_BINOP(POW); }
+{ NUMBER_ONLY_BINOP(POW, "__pow"); }
 
-static int cdata_unm(lua_State* L)
-{
-    struct ctype ct;
-    void* to;
-    int64_t val = to_intptr(L, 1, &ct);
-
-    if (ct.pointers) {
-        luaL_error(L, "can't negate a pointer value");
-    } else {
-        lua_pushnil(L);
-        ct.type = INT64_TYPE;
-        ct.base_size = 8;
-        to = push_cdata(L, -1, &ct);
-        *(int64_t*) to = -val;
-    }
-
-    return 1;
-}
-
-#define COMPARE_BINOP(OP)                                                   \
-    struct ctype lt, rt;                                                         \
+#define COMPARE_BINOP(OP, OPSTR)                                            \
+    struct ctype lt, rt;                                                    \
     int64_t left, right;                                                    \
     int res;                                                                \
                                                                             \
     lua_settop(L, 2);                                                       \
+                                                                            \
+    res = call_user_binop(L, OPSTR, 1, 2);                                  \
+    if (res >= 0) {                                                         \
+        return res;                                                         \
+    }                                                                       \
+                                                                            \
     left = to_intptr(L, 1, &lt);                                            \
     right = to_intptr(L, 2, &rt);                                           \
                                                                             \
@@ -1596,7 +1847,7 @@ static int cdata_unm(lua_State* L)
 
 static int cdata_eq(lua_State* L)
 {
-    COMPARE_BINOP(EQ);
+    COMPARE_BINOP(EQ, "__eq");
 err:
     lua_pushboolean(L, 0);
     return 1;
@@ -1604,7 +1855,7 @@ err:
 
 static int cdata_lt(lua_State* L)
 {
-    COMPARE_BINOP(LT);
+    COMPARE_BINOP(LT, "__lt");
 err:
     lua_getuservalue(L, 1);
     lua_getuservalue(L, 2);
@@ -1615,7 +1866,7 @@ err:
 
 static int cdata_le(lua_State* L)
 {
-    COMPARE_BINOP(LE);
+    COMPARE_BINOP(LE, "__le");
 err:
     lua_getuservalue(L, 1);
     lua_getuservalue(L, 2);
@@ -1632,7 +1883,7 @@ static int ctype_tostring(lua_State* L)
     check_ctype(L, 1, &ct);
     assert(lua_gettop(L) == 2);
     push_type_name(L, -1, &ct);
-    lua_pushfstring(L, "ctype: %p, %s", lua_topointer(L, 1), lua_tostring(L, -1));
+    lua_pushfstring(L, "ctype<%s>", lua_tostring(L, -1));
 
     return 1;
 }
@@ -1640,9 +1891,8 @@ static int ctype_tostring(lua_State* L)
 static int cdata_tostring(lua_State* L)
 {
     struct ctype ct;
-    void* p;
     char buf[64];
-    p = to_cdata(L, 1, &ct);
+    void* p = check_cdata(L, 1, &ct);
 
     if (ct.pointers == 0 && ct.type == UINT64_TYPE) {
         sprintf(buf, "%"PRIu64, *(uint64_t*) p);
@@ -1657,7 +1907,7 @@ static int cdata_tostring(lua_State* L)
 
     } else {
         push_type_name(L, -1, &ct);
-        lua_pushfstring(L, "cdata: %p, %s, %p", p, lua_tostring(L, -1), lua_topointer(L, 1));
+        lua_pushfstring(L, "cdata<%s>: %p", lua_tostring(L, -1), p);
     }
 
     return 1;
@@ -1682,7 +1932,7 @@ static int ffi_number(lua_State* L)
     struct ctype ct;
     void* data = to_cdata(L, 1, &ct);
 
-    if (data) {
+    if (ct.type != INVALID_TYPE) {
         if (ct.pointers) {
             return 0;
 
@@ -1971,6 +2221,8 @@ static const luaL_Reg cdata_mt[] = {
     {"__lt", &cdata_lt},
     {"__le", &cdata_le},
     {"__tostring", &cdata_tostring},
+    {"__concat", &cdata_concat},
+    {"__len", &cdata_len},
     {NULL, NULL}
 };
 
@@ -2001,7 +2253,7 @@ static const luaL_Reg ffi_reg[] = {
     {"new", &ffi_new},
     {"typeof", &ffi_typeof},
     {"cast", &ffi_cast},
-    /* {"metatype", &ffi_metatype}, TODO */
+    {"metatype", &ffi_metatype},
     {"gc", &ffi_gc},
     {"sizeof", &ffi_sizeof},
     {"alignof", &ffi_alignof},
