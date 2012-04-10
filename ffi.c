@@ -976,7 +976,7 @@ static int ffi_alignof(lua_State* L)
 
 static int ffi_offsetof(lua_State* L)
 {
-    size_t off;
+    int off;
     struct ctype ct, mt;
     lua_settop(L, 2);
     check_ctype(L, 1, &ct);
