@@ -7,7 +7,7 @@
 rem These should not have quotes
 @set LUA_INCLUDE=Z:\c\lua-5.2.0\src
 @set LUA_LIB=Z:\c\lua-5.2.0\lua5.2.lib
-@set LUA_EXE=Z:\c\lua-5.2.0\lua5.2.exe
+@set LUA_EXE=Z:\c\lua-5.2.0\lua.exe
 rem This the name of the dll that can be handed to LoadLibrary. This should not have a path.
 @set LUA_DLL=lua5.2.dll
 @goto :DEBUG
@@ -15,7 +15,7 @@ rem This the name of the dll that can be handed to LoadLibrary. This should not 
 :DEBUG_5_1
 @set LUA_INCLUDE=Z:\c\lua-5.1.4\src
 @set LUA_LIB=Z:\c\lua-5.1.4\lua5.1.lib
-@set LUA_EXE=Z:\c\lua-5.1.4\lua5.1.exe
+@set LUA_EXE=Z:\c\lua-5.1.4\lua.exe
 @set LUA_DLL=lua5.1.dll
 
 :DEBUG

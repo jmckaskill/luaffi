@@ -58,6 +58,11 @@ extern "C" {
 #include <sys/mman.h>
 #endif
 
+#if __STDC_VERSION__+0 >= 199901L
+#include <complex.h>
+#define HAVE_COMPLEX
+#endif
+
 #ifndef NDEBUG
 #define DASM_CHECKS
 #endif
@@ -79,12 +84,15 @@ struct jit;
 
 EXTERN_C EXPORT int luaopen_ffi(lua_State* L);
 
-#if LUA_VERSION_NUM == 501
-static int lua_absindex(lua_State* L, int idx) {
+static int lua_absindex2(lua_State* L, int idx) {
     return (LUA_REGISTRYINDEX <= idx && idx < 0)
          ? lua_gettop(L) + idx + 1
          : idx;
 }
+/* use our own version of lua_absindex such that lua_absindex(L, 0) == 0 */
+#define lua_absindex(L, idx) lua_absindex2(L, idx)
+
+#if LUA_VERSION_NUM == 501
 static void lua_callk(lua_State *L, int nargs, int nresults, int ctx, lua_CFunction k)
 {
     lua_call(L, nargs, nresults);
@@ -254,6 +262,8 @@ enum {
     VOID_TYPE,
     DOUBLE_TYPE,
     FLOAT_TYPE,
+    COMPLEX_DOUBLE_TYPE,
+    COMPLEX_FLOAT_TYPE,
     BOOL_TYPE,
     INT8_TYPE,
     INT16_TYPE,
@@ -271,7 +281,7 @@ enum {
 };
 
 #define IS_CHAR(type) ((type) == INT8_TYPE || (type) == UINT8_TYPE)
-#define IS_COMPLEX(type) ((type) == STRUCT_TYPE || (type) == UNION_TYPE || (type) == ENUM_TYPE || (type) == FUNCTION_TYPE)
+#define IS_COMPLEX(type) ((type) == COMPLEX_FLOAT_TYPE || (type) == COMPLEX_DOUBLE_TYPE)
 
 #define POINTER_BITS 2
 #define POINTER_MAX ((1 << POINTER_BITS) - 1)
@@ -335,6 +345,33 @@ struct cdata {
 
 typedef void (*cfunction)(void);
 
+#ifdef HAVE_COMPLEX
+typedef double complex complex_double;
+typedef float complex complex_float;
+#else
+typedef struct {
+    double real, imag;
+} complex_double;
+
+typedef struct {
+    float real, imag;
+} complex_float;
+
+static double creal(complex_double c) {
+    return c.real;
+}
+static float crealf(complex_float c) {
+    return c.real;
+}
+
+static double cimag(complex_double c) {
+    return c.imag;
+}
+static float cimagf(complex_float c) {
+    return c.imag;
+}
+#endif
+
 #define CALLBACK_FUNC_USR_IDX 1
 
 void set_defined(lua_State* L, int ct_usr, struct ctype* ct);
@@ -363,18 +400,21 @@ void compile_globals(struct jit* jit, lua_State* L);
 int get_extern(struct jit* jit, uint8_t* addr, int idx, int type);
 
 /* WARNING: assembly needs to be updated for prototype changes of these functions */
-int to_bool(lua_State* L, int idx);
-double to_double(lua_State* L, int idx);
-float to_float(lua_State* L, int idx);
-uint64_t to_uint64(lua_State* L, int idx);
-int64_t to_int64(lua_State* L, int idx);
-int32_t to_int32(lua_State* L, int idx);
-uint32_t to_uint32(lua_State* L, int idx);
-uintptr_t to_uintptr(lua_State* L, int idx);
-int32_t to_enum(lua_State* L, int idx, int to_usr, const struct ctype* tt);
+int check_bool(lua_State* L, int idx);
+double check_double(lua_State* L, int idx);
+double check_complex_imag(lua_State* L, int idx);
+float check_float(lua_State* L, int idx);
+uint64_t check_uint64(lua_State* L, int idx);
+int64_t check_int64(lua_State* L, int idx);
+int32_t check_int32(lua_State* L, int idx);
+uint32_t check_uint32(lua_State* L, int idx);
+uintptr_t check_uintptr(lua_State* L, int idx);
+int32_t check_enum(lua_State* L, int idx, int to_usr, const struct ctype* tt);
 /* these two will always push a value so that we can create structs/functions on the fly */
-void* to_typed_pointer(lua_State* L, int idx, int to_usr, const struct ctype* tt);
-cfunction to_typed_cfunction(lua_State* L, int idx, int to_usr, const struct ctype* tt);
+void* check_typed_pointer(lua_State* L, int idx, int to_usr, const struct ctype* tt);
+cfunction check_typed_cfunction(lua_State* L, int idx, int to_usr, const struct ctype* tt);
+complex_double check_complex_double(lua_State* L, int idx);
+complex_float check_complex_float(lua_State* L, int idx);
 
 void unpack_varargs_stack(lua_State* L, int first, int last, char* to);
 void unpack_varargs_reg(lua_State* L, int first, int last, char* to);

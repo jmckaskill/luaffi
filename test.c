@@ -13,6 +13,11 @@
 #include <errno.h>
 #endif
 
+#if __STDC_VERSION__+0 >= 199901L
+#include <complex.h>
+#define HAVE_COMPLEX
+#endif
+
 #ifdef __cplusplus
 # define EXTERN_C extern "C"
 #else
@@ -26,6 +31,17 @@
 #else
 #define EXPORT EXTERN_C
 #endif
+
+EXPORT bool have_complex();
+
+bool have_complex()
+{
+#ifdef HAVE_COMPLEX
+    return 1;
+#else
+    return 0;
+#endif
+}
 
 #define ADD(TYPE, NAME) \
     EXPORT TYPE NAME(TYPE a, TYPE b); \
@@ -41,12 +57,22 @@ ADD(int64_t, add_i64)
 ADD(uint64_t, add_u64)
 ADD(double, add_d)
 ADD(float, add_f)
+#ifdef HAVE_COMPLEX
+ADD(double complex, add_dc)
+//ADD(float complex, add_fc)
+EXPORT float complex add_fc(float complex a, float complex b);
+float complex add_fc(float complex a, float complex b)
+{
+    //fprintf(stderr, "%g+%gi %g+%gi\n", creal(a), cimag(a), creal(b), cimag(b));
+    return a + b;
+}
+#endif
 
-EXPORT _Bool ret_b(_Bool v);
-EXPORT _Bool ret_b2(_Bool v);
+EXPORT _Bool not_b(_Bool v);
+EXPORT _Bool not_b2(_Bool v);
 
-_Bool ret_b(_Bool v) {return !v;}
-_Bool ret_b2(_Bool v) {return !v;}
+_Bool not_b(_Bool v) {return !v;}
+_Bool not_b2(_Bool v) {return !v;}
 
 #define PRINT(TYPE, NAME, FORMAT) \
     EXPORT int NAME(char* buf, TYPE val); \
@@ -65,6 +91,13 @@ PRINT(float, print_f, "g")
 PRINT(const char*, print_s, "s")
 PRINT(void*, print_p, "p")
 
+#ifdef HAVE_COMPLEX
+EXPORT int print_dc(char* buf, double complex val);
+EXPORT int print_fc(char* buf, float complex val);
+int print_dc(char* buf, double complex val) {return sprintf(buf, "%g+%gi", creal(val), cimag(val));}
+int print_fc(char* buf, float complex val) {return sprintf(buf, "%g+%gi", creal(val), cimag(val));}
+#endif
+
 EXPORT int print_b(char* buf, _Bool val);
 EXPORT int print_b2(char* buf, _Bool val);
 int print_b(char* buf, _Bool val) {return sprintf(buf, "%s", val ? "true" : "false");}
@@ -80,6 +113,14 @@ int print_b2(char* buf, _Bool val) {return sprintf(buf, "%s", val ? "true" : "fa
         return print_##SUFFIX(buf, p->v);                                   \
     }
 
+#ifdef HAVE_COMPLEX
+#define COMPLEX_ALIGN(ALIGNMENT) \
+    ALIGN_UP(double complex, ALIGNMENT, dc) \
+    ALIGN_UP(float complex, ALIGNMENT, fc)
+#else
+#define COMPLEX_ALIGN(ALIGNMENT)
+#endif
+
 #define ALIGN2(ALIGNMENT)                   \
     ALIGN_UP(uint16_t, ALIGNMENT, u16)      \
     ALIGN_UP(uint32_t, ALIGNMENT, u32)      \
@@ -90,6 +131,7 @@ int print_b2(char* buf, _Bool val) {return sprintf(buf, "%s", val ? "true" : "fa
     ALIGN_UP(void*, ALIGNMENT, p)           \
     ALIGN_UP(_Bool, ALIGNMENT, b)           \
     ALIGN_UP(_Bool, ALIGNMENT, b2)          \
+    COMPLEX_ALIGN(ALIGNMENT)
 
 ALIGN2(0)
 
@@ -265,6 +307,10 @@ CALL(float, f)
 CALL(double, d)
 CALL(const char*, s)
 CALL(_Bool, b)
+#ifdef HAVE_COMPLEX
+CALL(double complex, dc)
+CALL(float complex, fc)
+#endif
 
 struct fptr {
 #ifdef _MSC_VER

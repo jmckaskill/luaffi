@@ -668,8 +668,7 @@ cfunction compile_callback(lua_State* L, int fidx, int ct_usr, const struct ctyp
                 lua_getuservalue(L, -1);
                 lua_rawseti(L, -3, ++num_upvals); /* mt */
                 lua_pop(L, 1);
-                | call_r extern lua_pushnil, L_ARG
-                | call_rrp extern push_cdata, L_ARG, -1, mt
+                | call_rrp extern push_cdata, L_ARG, 0, mt
                 get_int(Dst, ct, &reg, 1);
                 |.if X64
                 | mov [rax], rcx
@@ -677,18 +676,59 @@ cfunction compile_callback(lua_State* L, int fidx, int ct_usr, const struct ctyp
                 | mov [rax], ecx
                 | mov [rax+4], edx
                 |.endif
-                | call_rr extern lua_remove, L_ARG, -2
                 break;
 
             case UINTPTR_TYPE:
                 lua_getuservalue(L, -1);
                 lua_rawseti(L, -3, ++num_upvals); /* mt */
                 lua_pop(L, 1);
-                | call_r extern lua_pushnil, L_ARG
-                | call_rrp extern push_cdata, L_ARG, -1, mt
+                | call_rrp extern push_cdata, L_ARG, 0, mt
                 get_pointer(Dst, ct, &reg);
                 | mov [rax], rcx
-                | call_rr extern lua_remove, L_ARG, -2
+                break;
+
+            case COMPLEX_FLOAT_TYPE:
+                /* complex floats are two floats packed into a double */
+                lua_pop(L, 1);
+                | call_rrp extern push_cdata, L_ARG, 0, mt
+                get_float(Dst, ct, &reg, 1);
+                |.if X64
+                | movq qword [rax], xmm0
+                |.else
+                | call_rp extern luaL_error, L_ARG, &"NYI: complex float on x32" //TODO
+                |.endif
+                break;
+
+            case COMPLEX_DOUBLE_TYPE:
+                lua_pop(L, 1);
+                | call_rrp extern push_cdata, L_ARG, 0, mt
+                get_float(Dst, ct, &reg, 1);
+                |.if X64
+                | movq qword [rax], xmm0
+                |.else
+                | call_rp extern luaL_error, L_ARG, &"NYI: complex float on x32" //TODO
+                |.endif
+                get_float(Dst, ct, &reg, 1);
+                |.if X64
+                | movq qword [rax+8], xmm0
+                |.else
+                | call_rp extern luaL_error, L_ARG, &"NYI: complex float on x32" //TODO
+                |.endif
+                break;
+
+            case FLOAT_TYPE:
+            case DOUBLE_TYPE:
+                lua_pop(L, 1);
+                get_float(Dst, ct, &reg, mt->type == DOUBLE_TYPE);
+                |.if X64WIN
+                | mov rcx, L_ARG
+                |.elif X64
+                | mov rdi, L_ARG
+                |.else
+                | fstp qword [rsp+4]
+                | mov [rsp], L_ARG
+                |.endif
+                | call extern lua_pushnumber
                 break;
 
             case BOOL_TYPE:
@@ -738,21 +778,6 @@ cfunction compile_callback(lua_State* L, int fidx, int ct_usr, const struct ctyp
                 | call_rr extern push_uint, L_ARG, rcx
                 break;
 
-            case FLOAT_TYPE:
-            case DOUBLE_TYPE:
-                lua_pop(L, 1);
-                get_float(Dst, ct, &reg, mt->type == DOUBLE_TYPE);
-                |.if X64WIN
-                | mov rcx, L_ARG
-                |.elif X64
-                | mov rdi, L_ARG
-                |.else
-                | fstp qword [rsp+4]
-                | mov [rsp], L_ARG
-                |.endif
-                | call extern lua_pushnumber
-                break;
-
             default:
                 luaL_error(L, "NYI: callback arg type");
             }
@@ -772,7 +797,7 @@ cfunction compile_callback(lua_State* L, int fidx, int ct_usr, const struct ctyp
         lua_rawseti(L, -3, ++num_upvals); /* usr value */
         lua_rawseti(L, -2, ++num_upvals); /* mt */
         | call_rrr extern lua_rawgeti, L_ARG, -2, num_upvals-1
-        | call_rrrp extern to_typed_pointer, L_ARG, -2, -1, mt
+        | call_rrrp extern check_typed_pointer, L_ARG, -2, -1, mt
         | mov [rsp+32], rax
         | call_rr extern lua_settop, L_ARG, -4
         | mov rax, [rsp+32]
@@ -784,7 +809,7 @@ cfunction compile_callback(lua_State* L, int fidx, int ct_usr, const struct ctyp
             lua_rawseti(L, -3, ++num_upvals); /* usr value */
             lua_rawseti(L, -2, ++num_upvals); /* mt */
             | call_rrr extern lua_rawgeti, L_ARG, -2, num_upvals-1
-            | call_rrrp, extern to_enum, L_ARG, -2, -1, mt
+            | call_rrrp, extern check_enum, L_ARG, -2, -1, mt
             | mov [rsp+32], eax
             | call_rr extern lua_settop, L_ARG, -4
             | mov eax, [rsp+32]
@@ -800,7 +825,7 @@ cfunction compile_callback(lua_State* L, int fidx, int ct_usr, const struct ctyp
         case INT16_TYPE:
         case INT32_TYPE:
             lua_pop(L, 1);
-            | call_rr extern to_int32, L_ARG, -1
+            | call_rr extern check_int32, L_ARG, -1
             | mov [rsp+32], eax
             | call_rr extern lua_settop, L_ARG, -3
             | mov eax, [rsp+32]
@@ -810,18 +835,18 @@ cfunction compile_callback(lua_State* L, int fidx, int ct_usr, const struct ctyp
         case UINT16_TYPE:
         case UINT32_TYPE:
             lua_pop(L, 1);
-            | call_rr extern to_uint32, L_ARG, -1
+            | call_rr extern check_uint32, L_ARG, -1
             | mov [rsp+32], eax
             | call_rr extern lua_settop, L_ARG, -3
             | mov eax, [rsp+32]
             break;
 
         case INT64_TYPE:
-            | call_rr extern to_int64, L_ARG, -1
+            | call_rr extern check_int64, L_ARG, -1
             goto ret64;
 
         case UINT64_TYPE:
-            | call_rr extern to_uint64, L_ARG, -1
+            | call_rr extern check_uint64, L_ARG, -1
             goto ret64;
 
         ret64:
@@ -843,7 +868,7 @@ cfunction compile_callback(lua_State* L, int fidx, int ct_usr, const struct ctyp
 
         case UINTPTR_TYPE:
             lua_pop(L, 1);
-            | call_rr extern to_uintptr, L_ARG, -1
+            | call_rr extern check_uintptr, L_ARG, -1
             | mov [rsp+32], rax
             | call_rr extern lua_settop, L_ARG, -3
             | mov rax, [rsp+32]
@@ -852,7 +877,7 @@ cfunction compile_callback(lua_State* L, int fidx, int ct_usr, const struct ctyp
         case FLOAT_TYPE:
         case DOUBLE_TYPE:
             lua_pop(L, 1);
-            | call_rr extern to_double, L_ARG, -1
+            | call_rr extern check_double, L_ARG, -1
             |.if X64
             | movq qword [rsp+32], xmm0
             | call_rr extern lua_settop, L_ARG, -3
@@ -865,6 +890,33 @@ cfunction compile_callback(lua_State* L, int fidx, int ct_usr, const struct ctyp
             | fstp qword [rsp+32]
             | call_rr extern lua_settop, L_ARG, -3
             | fld qword [rsp+32]
+            |.endif
+            break;
+
+        case COMPLEX_FLOAT_TYPE:
+            /* complex floats are two floats packed into a double */
+            lua_pop(L, 1);
+            | call_rr extern check_complex_float, L_ARG, -1
+            |.if X64
+            | movq qword [rsp+32], xmm0
+            | call_rr extern lua_settop, L_ARG, -3
+            | movq xmm0, qword [rsp+32]
+            |.else
+            | call_rp extern luaL_error, L_ARG, &"NYI: complex float on x32" //TODO
+            |.endif
+            break;
+
+        case COMPLEX_DOUBLE_TYPE:
+            lua_pop(L, 1);
+            | call_rr extern check_complex_double, L_ARG, -1
+            |.if X64
+            | movq qword [rsp+32], xmm0
+            | movq qword [rsp+40], xmm1
+            | call_rr extern lua_settop, L_ARG, -3
+            | movq xmm0, qword [rsp+32]
+            | movq xmm1, qword [rsp+40]
+            |.else
+            | call_rp extern luaL_error, L_ARG, &"NYI: complex float on x32" //TODO
             |.endif
             break;
 
@@ -967,54 +1019,54 @@ void compile_function(lua_State* L, cfunction func, int ct_usr, const struct cty
         if (mbr_ct->pointers) {
             lua_getuservalue(L, -1);
             num_upvals += 2;
-            | call_rrrp extern to_typed_pointer, L_ARG, i, lua_upvalueindex(num_upvals), mbr_ct
+            | call_rrrp extern check_typed_pointer, L_ARG, i, lua_upvalueindex(num_upvals), mbr_ct
             add_pointer(Dst, ct, &reg);
         } else {
             switch (mbr_ct->type) {
             case FUNCTION_TYPE:
                 lua_getuservalue(L, -1);
                 num_upvals += 2;
-                | call_rrrp extern to_typed_cfunction, L_ARG, i, lua_upvalueindex(num_upvals), mbr_ct
+                | call_rrrp extern check_typed_cfunction, L_ARG, i, lua_upvalueindex(num_upvals), mbr_ct
                 add_pointer(Dst, ct, &reg);
                 break;
 
             case ENUM_TYPE:
                 lua_getuservalue(L, -1);
                 num_upvals += 2;
-                | call_rrrp, extern to_enum, L_ARG, i, lua_upvalueindex(num_upvals), mbr_ct
+                | call_rrrp, extern check_enum, L_ARG, i, lua_upvalueindex(num_upvals), mbr_ct
                 add_int(Dst, ct, &reg, 0);
                 break;
 
             case INT8_TYPE:
-                | call_rr extern to_int32, L_ARG, i
+                | call_rr extern check_int32, L_ARG, i
                 | movsx eax, al
                 add_int(Dst, ct, &reg, 0);
                 lua_pop(L, 1);
                 break;
 
             case UINT8_TYPE:
-                | call_rr extern to_uint32, L_ARG, i
+                | call_rr extern check_uint32, L_ARG, i
                 | movzx eax, al
                 add_int(Dst, ct, &reg, 0);
                 lua_pop(L, 1);
                 break;
 
             case INT16_TYPE:
-                | call_rr extern to_int32, L_ARG, i
+                | call_rr extern check_int32, L_ARG, i
                 | movsx eax, ax
                 add_int(Dst, ct, &reg, 0);
                 lua_pop(L, 1);
                 break;
 
             case UINT16_TYPE:
-                | call_rr extern to_uint32, L_ARG, i
+                | call_rr extern check_uint32, L_ARG, i
                 | movzx eax, ax
                 add_int(Dst, ct, &reg, 0);
                 lua_pop(L, 1);
                 break;
 
             case BOOL_TYPE:
-                | call_rr extern to_int32, L_ARG, i
+                | call_rr extern check_int32, L_ARG, i
                 | cmp eax, 0
                 | setne al
                 | movzx eax, al
@@ -1023,44 +1075,59 @@ void compile_function(lua_State* L, cfunction func, int ct_usr, const struct cty
                 break;
 
             case INT32_TYPE:
-                | call_rr extern to_int32, L_ARG, i
+                | call_rr extern check_int32, L_ARG, i
                 add_int(Dst, ct, &reg, 0);
                 lua_pop(L, 1);
                 break;
 
             case UINT32_TYPE:
-                | call_rr extern to_uint32, L_ARG, i
+                | call_rr extern check_uint32, L_ARG, i
                 add_int(Dst, ct, &reg, 0);
                 lua_pop(L, 1);
                 break;
 
             case UINTPTR_TYPE:
-                | call_rr extern to_uintptr, L_ARG, i
+                | call_rr extern check_uintptr, L_ARG, i
                 add_pointer(Dst, ct, &reg);
                 lua_pop(L, 1);
                 break;
 
             case INT64_TYPE:
-                | call_rr extern to_int64, L_ARG, i
+                | call_rr extern check_int64, L_ARG, i
                 add_int(Dst, ct, &reg, 1);
                 lua_pop(L, 1);
                 break;
 
             case UINT64_TYPE:
-                | call_rr extern to_uint64, L_ARG, i
+                | call_rr extern check_uint64, L_ARG, i
                 add_int(Dst, ct, &reg, 1);
                 lua_pop(L, 1);
                 break;
 
             case DOUBLE_TYPE:
-                | call_rr extern to_double, L_ARG, i
+                | call_rr extern check_double, L_ARG, i
+                add_float(Dst, ct, &reg, 1);
+                lua_pop(L, 1);
+                break;
+
+            case COMPLEX_DOUBLE_TYPE:
+                | call_rr extern check_complex_double, L_ARG, i
+                add_float(Dst, ct, &reg, 1);
+                | movq xmm0, xmm1
                 add_float(Dst, ct, &reg, 1);
                 lua_pop(L, 1);
                 break;
 
             case FLOAT_TYPE:
-                | call_rr extern to_double, L_ARG, i
+                | call_rr extern check_double, L_ARG, i
                 add_float(Dst, ct, &reg, 0);
+                lua_pop(L, 1);
+                break;
+
+            case COMPLEX_FLOAT_TYPE:
+                | call_rr extern check_complex_float, L_ARG, i
+                /* complex floats are two floats packed into a double */
+                add_float(Dst, ct, &reg, 1);
                 lua_pop(L, 1);
                 break;
 
@@ -1296,8 +1363,7 @@ void compile_function(lua_State* L, cfunction func, int ct_usr, const struct cty
             |.endif
             |
             | get_errno
-            | call_r extern lua_pushnil, L_ARG
-            | call_rrp extern push_cdata, L_ARG, -1, mbr_ct
+            | call_rrp extern push_cdata, L_ARG, 0, mbr_ct
             |
             | // *(int64_t*) cdata = val
             |.if X64
@@ -1308,6 +1374,66 @@ void compile_function(lua_State* L, cfunction func, int ct_usr, const struct cty
             | mov rdx, [rsp+32]
             | mov [rax+4], rcx
             | mov [rax], rdx
+            |.endif
+            |
+            | jmp ->lua_return_arg
+            break;
+
+        case COMPLEX_FLOAT_TYPE:
+            num_upvals++;
+            |.if X64
+            | movq qword [rsp+32], xmm0 // complex floats are two floats packed into a single register
+            |.else
+            | call_rp extern luaL_error, L_ARG, &"NYI: complex float on x32" //TODO
+            |.endif
+            |
+            | get_errno
+            | call_rrp extern push_cdata, L_ARG, 0, mbr_ct
+            |
+            | // ((complex_float*) cdata) = val
+            |.if X64
+            | mov rcx, [rsp+32]
+            | mov [rax], rcx
+            |.else
+            | mov rcx, [rsp+8]
+            | mov [rax+4], rcx
+            | mov rcx, [rsp+4]
+            | mov [rax], rcx
+            |.endif
+            |
+            | jmp ->lua_return_arg
+            break;
+
+        case COMPLEX_DOUBLE_TYPE:
+            num_upvals++;
+            |.if X64
+            | movq qword [rsp+40], xmm1
+            | movq qword [rsp+32], xmm0
+            |.else
+            | call_rp extern luaL_error, L_ARG, &"NYI: complex double on x32" //TODO
+            | fstp qword [rsp+4] // note get_errno doesn't require any stack on x86
+            | fstp qword [rsp+12]
+            |.endif
+            |
+            | get_errno
+            | call_rrp extern push_cdata, L_ARG, 0, mbr_ct
+            |
+            | // ((complex_double*) cdata)->real = val0
+            | // ((complex_double*) cdata)->imag = val1
+            |.if X64
+            | mov rcx, [rsp+40]
+            | mov [rax+8], rcx
+            | mov rcx, [rsp+32]
+            | mov [rax], rcx
+            |.else
+            | mov rcx, [rsp+16]
+            | mov [rax+12], rcx
+            | mov rcx, [rsp+12]
+            | mov [rax+8], rcx
+            | mov rcx, [rsp+8]
+            | mov [rax+4], rcx
+            | mov rcx, [rsp+4]
+            | mov [rax], rcx
             |.endif
             |
             | jmp ->lua_return_arg

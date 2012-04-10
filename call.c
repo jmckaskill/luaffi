@@ -17,18 +17,6 @@ static void push_uint(lua_State* L, unsigned int val)
 static void push_float(lua_State* L, float val)
 { lua_pushnumber(L, val); }
 
-static void print(lua_State* L, int** p, size_t sz)
-{
-    size_t i;
-    lua_getglobal(L, "print");
-    lua_pushfstring(L, "%p", p);
-    for (i = 0; i < sz; i++) {
-        lua_pushfstring(L, " %p", p[i]);
-    }
-    lua_concat(L, (int) sz + 1);
-    lua_call(L, 1, 0);
-}
-
 #ifndef _WIN32
 static int GetLastError(void)
 { return errno; }
@@ -157,17 +145,18 @@ static void* reserve_code(struct jit* jit, lua_State* L, size_t sz)
         lua_pushcfunction(L, (lua_CFunction) func); \
         lua_rawset(L, -3)
 
-        ADDFUNC(NULL, print);
-        ADDFUNC(NULL, to_double);
-        ADDFUNC(NULL, to_float);
-        ADDFUNC(NULL, to_uint64);
-        ADDFUNC(NULL, to_int64);
-        ADDFUNC(NULL, to_int32);
-        ADDFUNC(NULL, to_uint32);
-        ADDFUNC(NULL, to_uintptr);
-        ADDFUNC(NULL, to_enum);
-        ADDFUNC(NULL, to_typed_pointer);
-        ADDFUNC(NULL, to_typed_cfunction);
+        ADDFUNC(NULL, check_double);
+        ADDFUNC(NULL, check_float);
+        ADDFUNC(NULL, check_uint64);
+        ADDFUNC(NULL, check_int64);
+        ADDFUNC(NULL, check_int32);
+        ADDFUNC(NULL, check_uint32);
+        ADDFUNC(NULL, check_uintptr);
+        ADDFUNC(NULL, check_enum);
+        ADDFUNC(NULL, check_typed_pointer);
+        ADDFUNC(NULL, check_typed_cfunction);
+        ADDFUNC(NULL, check_complex_double);
+        ADDFUNC(NULL, check_complex_float);
         ADDFUNC(NULL, unpack_varargs_stack);
         ADDFUNC(NULL, unpack_varargs_stack_skip);
         ADDFUNC(NULL, unpack_varargs_reg);

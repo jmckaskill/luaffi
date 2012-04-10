@@ -137,13 +137,13 @@ void* push_cdata(lua_State* L, int ct_usr, const struct ctype* ct)
     memset(cd+1, 0, sz);
 
 #if LUA_VERSION_NUM == 501
-    if (lua_isnil(L, ct_usr)) {
+    if (ct_usr && lua_isnil(L, ct_usr)) {
         push_upval(L, &niluv_key);
         lua_setfenv(L, -2);
     }
 #endif
 
-    if (!lua_isnil(L, ct_usr)) {
+    if (ct_usr && !lua_isnil(L, ct_usr)) {
         lua_pushvalue(L, ct_usr);
         lua_setuservalue(L, -2);
     }
@@ -208,7 +208,7 @@ void* to_cdata(lua_State* L, int idx, struct ctype* ct)
     struct cdata* cd;
 
     ct->type = INVALID_TYPE;
-    if (!lua_getmetatable(L, idx)) {
+    if (!lua_isuserdata(L, idx) || !lua_getmetatable(L, idx)) {
         lua_pushnil(L);
         return NULL;
     }

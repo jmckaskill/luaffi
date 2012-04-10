@@ -8,7 +8,7 @@ LUA=../lua-5.2.0/src/lua
 LUA_CFLAGS=-I../lua-5.2.0/src
 SOCFLAGS=-fPIC
 SOCC=$(CC) -shared $(SOCFLAGS)
-CFLAGS=-fPIC -g -Wall -Werror $(LUA_CFLAGS) -fvisibility=hidden -Wno-unused-function
+CFLAGS=-O2 -fPIC -g -Wall -Werror $(LUA_CFLAGS) -fvisibility=hidden -Wno-unused-function --std=gnu99
 
 MODNAME=ffi
 MODSO=$(MODNAME).so

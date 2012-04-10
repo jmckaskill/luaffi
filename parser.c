@@ -838,7 +838,7 @@ static int parse_type_name(lua_State* L, struct parser* P)
             flags |= DOUBLE;
         } else if (IS_LITERAL(tok, "float")) {
             flags |= FLOAT;
-        } else if (IS_LITERAL(tok, "complex")) {
+        } else if (IS_LITERAL(tok, "complex") || IS_LITERAL(tok, "_Complex")) {
             flags |= COMPLEX;
         } else {
             break;
@@ -870,7 +870,13 @@ static int parse_type_name(lua_State* L, struct parser* P)
         }
 
     } else if (flags & COMPLEX) {
-        luaL_error(L, "NYI complex");
+        if (flags & LONG) {
+            luaL_error(L, "NYI: long complex double");
+        } else if (flags & FLOAT) {
+            lua_pushliteral(L, "complex float");
+        } else {
+            lua_pushliteral(L, "complex double");
+        }
 
     } else if (flags & DOUBLE) {
         if (flags & LONG) {
@@ -1053,6 +1059,12 @@ static void append_type_name(luaL_Buffer* B, int usr, const struct ctype* ct)
         break;
     case FLOAT_TYPE:
         luaL_addstring(B, "float");
+        break;
+    case COMPLEX_DOUBLE_TYPE:
+        luaL_addstring(B, "double complex");
+        break;
+    case COMPLEX_FLOAT_TYPE:
+        luaL_addstring(B, "float complex");
         break;
     case INT8_TYPE:
         luaL_addstring(B, "char");

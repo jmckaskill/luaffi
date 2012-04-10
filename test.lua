@@ -20,6 +20,8 @@ end
 print('Running test')
 
 ffi.cdef [[
+bool have_complex();
+
 int8_t add_i8(int8_t a, int8_t b);
 uint8_t add_u8(uint8_t a, uint8_t b);
 int16_t add_i16(int16_t a, int16_t b);
@@ -30,8 +32,10 @@ int64_t add_i64(int64_t a, int64_t b);
 uint64_t add_u64(uint64_t a, uint64_t b);
 double add_d(double a, double b);
 float add_f(float a, float b);
-bool ret_b(bool v);
-_Bool ret_b2(_Bool v);
+double complex add_dc(double complex a, double complex b);
+float complex add_fc(float complex a, float complex b);
+bool not_b(bool v);
+_Bool not_b2(_Bool v);
 
 int print_i8(char* buf, int8_t val);
 int print_u8(char* buf, uint8_t val);
@@ -47,6 +51,8 @@ int print_b2(char* buf, _Bool val);
 int print_d(char* buf, double val);
 int print_f(char* buf, float val);
 int print_p(char* buf, void* val);
+int print_dc(char* buf, double complex val);
+int print_fc(char* buf, float complex val);
 int sprintf(char* buf, const char* format, ...);
 
 // Examples from MSDN
@@ -156,6 +162,7 @@ local palign = [[
 #pragma pack(pop)
 ]]
 
+local i = ffi.C.i
 local test_values = {
     ['void*'] = ffi.new('char[3]'),
     ['const char*'] = 'foo',
@@ -166,6 +173,20 @@ local test_values = {
     uint64_t = 12345678901234,
     bool = true,
     _Bool = false,
+    ['float complex'] = 3+4*i,
+    ['double complex'] = 5+6*i,
+}
+
+local types = {
+    b = 'bool',
+    b2 = '_Bool',
+    d = 'double',
+    f = 'float',
+    u64 = 'uint64_t',
+    u32 = 'uint32_t',
+    u16 = 'uint16_t',
+    s = 'const char*',
+    p = 'void*'
 }
 
 local buf = ffi.new('char[256]')
@@ -188,10 +209,20 @@ for convention,c in pairs(dlls) do
     check(c.add_i16(2000,4000), 6000)
     check(c.add_d(20, 12), 32)
     check(c.add_f(40, 32), 72)
-    check(c.ret_b(true), false)
-    check(c.ret_b2(false), true)
+    check(c.not_b(true), false)
+    check(c.not_b2(false), true)
 
-    for suffix, type in pairs{b = 'bool', b2 = '_Bool', d = 'double', f = 'float', u64 = 'uint64_t', u32 = 'uint32_t', u16 = 'uint16_t', s = 'const char*', p = 'void*'} do
+    if c.have_complex() then
+        check(c.add_dc(3+4*i, 4+5*i), 7+9*i)
+        check(c.add_fc(2+4*i, 6+8*i), 8+12*i)
+        types.dc = 'double complex'
+        types.fc = 'float complex'
+    else
+        types.dc = nil
+        types.fc = nil
+    end
+
+    for suffix, type in pairs(types) do
         local test = test_values[type]
         --print('checkbuf', suffix, type, buf, test)
         checkbuf(type, suffix, c['print_' .. suffix](buf, test))
@@ -241,6 +272,8 @@ for convention,c in pairs(dlls) do
     double call_d(double (*__cdecl func)(double), double arg);
     const char* call_s(sfunc func, const char* arg);
     _Bool call_b(_Bool (*__cdecl func)(_Bool), _Bool arg);
+    double complex call_dc(double complex (*__cdecl func)(double complex), double complex arg);
+    float complex call_fc(float complex (*__cdecl func)(float complex), float complex arg);
     ]]
 
     ffi.cdef(cbs:gsub('__cdecl', convention))
@@ -251,6 +284,11 @@ for convention,c in pairs(dlls) do
     assert(math.abs(c.call_f(function(a) return 2*a end, 3.2) - 6.4) < 0.000001)
     check(ffi.string(c.call_s(function(s) return s + u3 end, 'foobar')), 'bar')
     check(c.call_b(function(v) return not v end, true), false)
+
+    if c.have_complex() then
+        check(c.call_dc(function(v) return v + 2+3*i end, 4+6*i), 6+9*i)
+        check(c.call_fc(function(v) return v + 1+2*i end, 7+4*i), 8+6*i)
+    end
 
     local u2 = ffi.new('uint64_t', 2)
     local cb = ffi.new('sfunc', function(s) return s + u3 end)
@@ -384,6 +422,10 @@ if _VERSION ~= 'Lua 5.1' then
     check(vls .. 'str', '5str')
     check(#vls, 5)
 end
+
+check(tostring(1+3*i), '1+3i')
+check(tostring((1+3*i)*(2+4*i)), '-10+10i')
+check(tostring((3+2*i)*(3-2*i)), '13')
 
 print('Test PASSED')
 
