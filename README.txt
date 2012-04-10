@@ -76,10 +76,20 @@ windows.
 
 Todo
 ----
-- C++ classes (excluding inline c++ functions)
-- All the various gcc and msvc attributes
-- Finish and test OSX support
-- ffi.metatable
+- GCC style attributes
+- Fix arm support - broken since the callback refactor
+- Vectors
+- C++ reference types
+- Linking with global values
+- Alternate GCC keywords with __ eg __const__
+- GCC __extension__ and __align__ keywords
+- asm("") and __asm("") for symbol redirection
+- MSVC fixed size types __int8, etc
+- MSVC __declspec keywords
+- __builtin_va_list and __gnuc_va_list
+- Add support for complex numbers on x86
+- Subtracting one pointer from another
+- Variable sized members in unions (is this needed?)
 
 How it works
 ------------
