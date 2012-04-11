@@ -184,6 +184,8 @@ static void luaL_setfuncs (lua_State *L, const luaL_Reg *l, int nup) {
 #define ALLOW_MISALIGNED_ACCESS
 #endif
 
+struct token;
+
 struct parser {
     int line;
     const char* next;
@@ -235,6 +237,7 @@ extern int functions_key;
 extern int abi_key;
 extern int next_unnamed_key;
 extern int niluv_key;
+extern int asmname_key;
 
 int equals_upval(lua_State* L, int idx, int* key);
 void push_upval(lua_State* L, int* key);
@@ -386,7 +389,7 @@ void* check_cdata(lua_State* L, int idx, struct ctype* ct);
 size_t ctype_size(lua_State* L, const struct ctype* ct);
 
 int parse_type(lua_State* L, struct parser* P, struct ctype* type);
-const char* parse_argument(lua_State* L, struct parser* P, int ct_usr, struct ctype* type, size_t* namesz);
+void parse_argument(lua_State* L, struct parser* P, int ct_usr, struct ctype* type, struct token* name, struct token* asmname);
 void push_type_name(lua_State* L, int usr, const struct ctype* ct);
 
 int push_user_mt(lua_State* L, int ct_usr, const struct ctype* ct);

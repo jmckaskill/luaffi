@@ -193,7 +193,7 @@ void check_ctype(lua_State* L, int idx, struct ctype* ct)
         P.prev = P.next = lua_tostring(L, idx);
         P.align_mask = DEFAULT_ALIGN_MASK;
         parse_type(L, &P, ct);
-        parse_argument(L, &P, -1, ct, NULL);
+        parse_argument(L, &P, -1, ct, NULL, NULL);
         lua_remove(L, -2); /* remove the user value from parse_type */
 
     } else if (lua_getmetatable(L, idx)) {

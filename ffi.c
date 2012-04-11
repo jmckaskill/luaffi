@@ -18,6 +18,7 @@ int functions_key;
 int abi_key;
 int next_unnamed_key;
 int niluv_key;
+int asmname_key;
 
 void push_upval(lua_State* L, int* key)
 {
@@ -2274,30 +2275,20 @@ static int ffi_load(lua_State* L)
     return 1;
 }
 
-static int find_function(lua_State* L, int module, int name, int usr, const struct ctype* ct)
+static int find_function(lua_State* L, int module, const char* asmname, int usr, const struct ctype* ct)
 {
     size_t i;
     void** libs = (void**) lua_touserdata(L, module);
     size_t num = lua_rawlen(L, module) / sizeof(void*);
-    const char* funcname = lua_tostring(L, name);
 
-    module = lua_absindex(L, module);
-    name = lua_absindex(L, name);
     usr = lua_absindex(L, usr);
 
     for (i = 0; i < num; i++) {
         if (libs[i]) {
-            cfunction func = (cfunction) GetProcAddressA(libs[i], funcname);
+            cfunction func = (cfunction) GetProcAddressA(libs[i], asmname);
 
             if (func) {
                 compile_function(L, func, usr, ct);
-
-                /* cache the function in this module's user value for next time */
-                lua_getuservalue(L, module);
-                lua_pushvalue(L, name);
-                lua_pushvalue(L, -3);
-                lua_rawset(L, 3);
-                lua_pop(L, 1);
                 return 1;
             }
         }
@@ -2310,8 +2301,12 @@ static int cmodule_index(lua_State* L)
 {
     const char* funcname;
     struct ctype ct;
+    int ct_usr;
+    int mod_usr;
 
+    lua_settop(L, 2);
     lua_getuservalue(L, 1);
+    mod_usr = lua_gettop(L);
     lua_pushvalue(L, 2);
     lua_rawget(L, -2);
 
@@ -2333,28 +2328,41 @@ static int cmodule_index(lua_State* L)
     }
     ct = *(const struct ctype*) lua_touserdata(L, -1);
     lua_getuservalue(L, -1);
+    ct_usr = lua_gettop(L);
 
-    if (find_function(L, 1, 2, -1, &ct)) {
-        return 1;
+    /* replace funcname with the assembly name if its different */
+    lua_pushlightuserdata(L, &asmname_key);
+    lua_rawget(L, ct_usr);
+    if (!lua_isnil(L, -1)) {
+        funcname = lua_tostring(L, -1);
+    }
+
+    if (find_function(L, 1, funcname, ct_usr, &ct)) {
+        goto end;
     }
 
 #if defined _WIN32 && !defined _WIN64 && (defined __i386__ || defined _M_IX86)
     ct.calling_convention = STD_CALL;
-    lua_pushfstring(L, "_%s@%d", funcname, x86_stack_required(L, -1));
-    if (find_function(L, 1, -1, -2, &ct)) {
-        return 1;
+    lua_pushfstring(L, "_%s@%d", funcname, x86_stack_required(L, ct_usr));
+    if (find_function(L, 1, lua_tostring(L, -1), ct_usr, &ct)) {
+        goto end;
     }
-    lua_pop(L, 1);
 
     ct.calling_convention = FAST_CALL;
-    lua_pushfstring(L, "@%s@%d", funcname, x86_stack_required(L, -1));
-    if (find_function(L, 1, -1, -2, &ct)) {
-        return 1;
+    lua_pushfstring(L, "@%s@%d", funcname, x86_stack_required(L, ct_usr));
+    if (find_function(L, 1, lua_tostring(L, -1), ct_usr, &ct)) {
+        goto end;
     }
-    lua_pop(L, 1);
 #endif
 
     return luaL_error(L, "failed to find function %s", funcname);
+
+end:
+    /* set module usr value[luaname] = function to cache for next time */
+    lua_pushvalue(L, 2);
+    lua_pushvalue(L, -2);
+    lua_rawset(L, mod_usr);
+    return 1;
 }
 
 static int jit_gc(lua_State* L)
@@ -2537,7 +2545,7 @@ static void add_typedef(lua_State* L, const char* from, const char* to)
 
     push_upval(L, &types_key);
     parse_type(L, &P, &ct);
-    parse_argument(L, &P, -1, &ct, NULL);
+    parse_argument(L, &P, -1, &ct, NULL, NULL);
     push_ctype(L, -1, &ct);
 
     /* stack is at +4: types, type usr, arg usr, ctype */

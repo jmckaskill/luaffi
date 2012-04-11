@@ -21,6 +21,7 @@ print('Running test')
 
 ffi.cdef [[
 bool have_complex();
+bool have_complex2() __asm("have_complex");
 int max_alignment();
 
 int8_t add_i8(int8_t a, int8_t b);
@@ -241,6 +242,8 @@ for convention,c in pairs(dlls) do
         types.dc = nil
         types.fc = nil
     end
+
+    check(c.have_complex(), c.have_complex2())
 
     for suffix, type in pairs(types) do
         local test = test_values[type]
