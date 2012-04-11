@@ -320,6 +320,15 @@ for convention,c in pairs(dlls) do
     check(ffi.errno(), 4)
     check(c.get_errno(), 4)
 
+    local gccattr = {
+        __cdecl = 'int test_pow(int v) __attribute__((cdecl));',
+        __stdcall = 'int test_pow(int v) __attribute__(stdcall);',
+        __fastcall = '__attribute__(fastcall) int test_pow(int v);',
+    }
+
+    ffi.cdef(gccattr[convention])
+    check(c.test_pow(5), 25)
+
     first = false
 end
 

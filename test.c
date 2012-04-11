@@ -43,6 +43,10 @@ bool have_complex()
 #endif
 }
 
+EXPORT int test_pow(int v);
+int test_pow(int v)
+{ return v * v; }
+
 #define ADD(TYPE, NAME) \
     EXPORT TYPE NAME(TYPE a, TYPE b); \
     TYPE NAME(TYPE a, TYPE b) { return a + b; }

@@ -933,6 +933,63 @@ static int parse_type_name(lua_State* L, struct parser* P)
     return 0;
 }
 
+/* parse_attribute parses a token to see if it is an attribute. It may then
+ * parse some following tokens to decode the attribute setting the appropriate
+ * fields in ct. It will return 1 if the token was used (and possibly some
+ * more following it) or 0 if not. If the token was used, the next token must
+ * be retrieved using next_token/require_token.
+ */
+static int parse_attribute(lua_State* L, struct parser* P, struct token* tok, struct ctype* ct)
+{
+    if (tok->type != TOK_TOKEN) {
+        return 0;
+
+    } else if (IS_LITERAL(*tok, "__attribute__") || IS_LITERAL(*tok, "__declspec")) {
+        int parens = 1;
+        check_token(L, P, TOK_OPEN_PAREN, NULL, "expected parenthesis after __attribute__ or __declspec on line %d", P->line);
+
+        for (;;) {
+            require_token(L, P, tok);
+            if (tok->type == TOK_OPEN_PAREN) {
+                parens++;
+            } else if (tok->type == TOK_CLOSE_PAREN) {
+                if (--parens == 0) {
+                    break;
+                }
+
+            } else if (tok->type != TOK_TOKEN) {
+                /* ignore unknown symbols within parentheses */
+
+            } else if (IS_LITERAL(*tok, "cdecl")) {
+                ct->calling_convention = C_CALL;
+
+            } else if (IS_LITERAL(*tok, "fastcall")) {
+                ct->calling_convention = FAST_CALL;
+
+            } else if (IS_LITERAL(*tok, "stdcall")) {
+                ct->calling_convention = STD_CALL;
+            }
+            /* ignore unknown tokens within parentheses */
+        }
+        return 1;
+
+    } else if (IS_LITERAL(*tok, "__cdecl")) {
+        ct->calling_convention = C_CALL;
+        return 1;
+
+    } else if (IS_LITERAL(*tok, "__fastcall")) {
+        ct->calling_convention = FAST_CALL;
+        return 1;
+
+    } else if (IS_LITERAL(*tok, "__stdcall")) {
+        ct->calling_convention = STD_CALL;
+        return 1;
+
+    } else {
+        return 0;
+    }
+}
+
 /* parses out the base type of a type expression in a function declaration,
  * struct definition, typedef etc
  *
@@ -946,6 +1003,11 @@ int parse_type(lua_State* L, struct parser* P, struct ctype* ct)
     memset(ct, 0, sizeof(*ct));
 
     require_token(L, P, &tok);
+
+    /* get function attributes before the return type */
+    while (parse_attribute(L, P, &tok, ct)) {
+        require_token(L, P, &tok);
+    }
 
     /* get const/volatile before the base type */
     for (;;) {
@@ -1363,6 +1425,9 @@ const char* parse_argument(lua_State* L, struct parser* P, int ct_usr, struct ct
         } else if (tok.type == TOK_REFERENCE) {
             luaL_error(L, "NYI: c++ reference types");
 
+        } else if (parse_attribute(L, P, &tok, type)) {
+            /* parse attribute has filled out appropriate fields in type */
+
         } else if (tok.type == TOK_OPEN_PAREN) {
             /* we have a function pointer or a function */
 
@@ -1394,21 +1459,11 @@ const char* parse_argument(lua_State* L, struct parser* P, int ct_usr, struct ct
                         type->pointers++;
                         type->const_mask <<= 1;
 
+                    } else if (parse_attribute(L, P, &tok, type)) {
+                        /* parse_attribute sets the appropriate fields */
+
                     } else if (tok.type != TOK_TOKEN) {
                         luaL_error(L, "unexpected token in function on line %d", P->line);
-
-                    } else if (IS_LITERAL(tok, "__cdecl")) {
-                        type->calling_convention = C_CALL;
-
-                    } else if (IS_LITERAL(tok, "__stdcall")) {
-#if defined __i386__ || defined _M_IX86
-                        type->calling_convention = STD_CALL;
-#endif
-
-                    } else if (IS_LITERAL(tok, "__fastcall")) {
-#if defined __i386__ || defined _M_IX86
-                        type->calling_convention = FAST_CALL;
-#endif
 
                     } else if (IS_LITERAL(tok, "const") || IS_LITERAL(tok, "volatile")) {
                         /* ignored for now */
@@ -1438,6 +1493,19 @@ const char* parse_argument(lua_State* L, struct parser* P, int ct_usr, struct ct
             }
 
             parse_function_arguments(L, P, type, ct_usr, &ret_type);
+
+            /* Parse attributes after the arguments closing paren */
+            for (;;) {
+                if (!next_token(L, P, &tok)) {
+                    break;
+                }
+
+                if (!parse_attribute(L, P, &tok, type)) {
+                    put_back(P);
+                    break;
+                }
+            }
+
             return name;
 
         } else if (tok.type == TOK_OPEN_SQUARE) {
@@ -1476,8 +1544,6 @@ const char* parse_argument(lua_State* L, struct parser* P, int ct_usr, struct ct
                 type->array_size = (size_t) asize;
                 check_token(L, P, TOK_CLOSE_SQUARE, "", "invalid character in array on line %d", P->line);
             }
-
-            break;
 
         } else if (tok.type == TOK_COLON) {
             int64_t bsize = calculate_constant(L, P);
