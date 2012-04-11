@@ -132,9 +132,26 @@ void* push_cdata(lua_State* L, int ct_usr, const struct ctype* ct)
     size_t sz = ct->is_reference ? sizeof(void*) : ctype_size(L, ct);
     ct_usr = lua_absindex(L, ct_usr);
 
+    /* This is to stop valgrind from complaining. Bitfields are accessed in 8
+     * byte chunks so that the code doesn't have to deal with different access
+     * patterns, but this means that occasionally it will read past the end of
+     * the struct. As its not setting the bits past the end (only reading and
+     * then writing the bits back) and the read is aligned its a non-issue,
+     * but valgrind complains nonetheless.
+     */
+    if (ct->has_bitfield) {
+        sz = ALIGN_UP(sz, 7);
+    }
+
     cd = (struct cdata*) lua_newuserdata(L, sizeof(struct cdata) + sz);
     *(struct ctype*) &cd->type = *ct;
     memset(cd+1, 0, sz);
+
+    /* TODO: handle cases where lua_newuserdata returns a pointer that is not
+     * aligned */
+#if 0
+    assert((uintptr_t) (cd + 1) % 8 == 0);
+#endif
 
 #if LUA_VERSION_NUM == 501
     if (ct_usr && lua_isnil(L, ct_usr)) {

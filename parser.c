@@ -447,6 +447,10 @@ static int calculate_member_position(lua_State* L, struct parser* P, struct ctyp
         ct->align_mask = P->align_mask;
     }
 
+    if (mt->has_bitfield || mt->is_bitfield) {
+        ct->has_bitfield = 1;
+    }
+
     *pbits_left = bits_left;
     *pbit_offset = bit_offset;
     return 0;

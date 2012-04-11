@@ -329,6 +329,7 @@ struct ctype {
     unsigned is_variable_struct : 1;
     unsigned variable_size_known : 1; /* used for variable structs after we know the variable size */
     unsigned is_bitfield : 1;
+    unsigned has_bitfield : 1;
     unsigned is_jitted : 1;
 };
 
