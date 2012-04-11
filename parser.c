@@ -298,10 +298,15 @@ static int parse_enum(lua_State* L, struct parser* P, struct ctype* type)
 
 static int calculate_member_position(lua_State* L, struct parser* P, struct ctype* ct, struct ctype* mt, int* pbit_offset, int* pbits_left)
 {
-    int malign = (mt->pointers - mt->is_array) ? PTR_ALIGN_MASK : mt->align_mask;
+    int malign = mt->align_mask;
     int palign = min(P->align_mask, malign);
     int bit_offset = *pbit_offset;
     int bits_left = *pbits_left;
+
+    if (mt->align_is_forced) {
+        palign = malign;
+        ct->align_is_forced = 1;
+    }
 
     if (ct->type == UNION_TYPE) {
         size_t msize;
@@ -419,6 +424,7 @@ static int calculate_member_position(lua_State* L, struct parser* P, struct ctyp
         bits_left = bit_offset = 0;
 
         mt->offset = ALIGN_UP(ct->base_size, palign);
+        ct->base_size = mt->offset;
 
         if (mt->is_variable_array) {
             ct->is_variable_struct = 1;
@@ -441,10 +447,6 @@ static int calculate_member_position(lua_State* L, struct parser* P, struct ctyp
     /* increase the outer struct/union alignment if needed */
     if (palign > (int) ct->align_mask) {
         ct->align_mask = palign;
-    }
-
-    if ((int) ct->align_mask > P->align_mask) {
-        ct->align_mask = P->align_mask;
     }
 
     if (mt->has_bitfield || mt->is_bitfield) {
@@ -960,6 +962,44 @@ static int parse_attribute(lua_State* L, struct parser* P, struct token* tok, st
             } else if (tok->type != TOK_TOKEN) {
                 /* ignore unknown symbols within parentheses */
 
+            } else if (IS_LITERAL(*tok, "align") || IS_LITERAL(*tok, "aligned")) {
+                require_token(L, P, tok);
+
+                if (tok->type == TOK_CLOSE_PAREN) {
+                    // TODO: atm we just leave this as it was, but is there a
+                    // better way of handling this?
+                    put_back(P);
+                    ct->align_is_forced = 1;
+                    continue;
+                } else if (tok->type != TOK_OPEN_PAREN) {
+                    luaL_error(L, "unexpected token in align on line %d", P->line);
+                }
+
+                require_token(L, P, tok);
+                if (tok->type != TOK_NUMBER) {
+                    return luaL_error(L, "unexpected token in align on line %d", P->line);
+                }
+
+                switch (tok->integer) {
+                // TODO: atm we just leave this as it was, but is there a
+                // better way of handling this
+                case 0: break;
+                case 1: ct->align_mask = 0; break;
+                case 2: ct->align_mask = 1; break;
+                case 4: ct->align_mask = 3; break;
+                case 8: ct->align_mask = 7; break;
+                case 16: ct->align_mask = 15; break;
+                default:
+                    return luaL_error(L, "unsupported align size on line %d", P->line);
+                }
+
+                ct->align_is_forced = 1;
+                check_token(L, P, TOK_CLOSE_PAREN, NULL, "expected align(#) on line %d", P->line);
+
+            } else if (IS_LITERAL(*tok, "packed")) {
+                ct->align_mask = 0;
+                ct->align_is_forced = 1;
+
             } else if (IS_LITERAL(*tok, "cdecl")) {
                 ct->calling_convention = C_CALL;
 
@@ -1044,7 +1084,7 @@ int parse_type(lua_State* L, struct parser* P, struct ctype* ct)
         parse_record(L, P, ct);
 
     } else {
-        int const_mask = ct->const_mask;
+        struct ctype ct2 = *ct;
         put_back(P);
 
         /* lookup type */
@@ -1060,7 +1100,11 @@ int parse_type(lua_State* L, struct parser* P, struct ctype* ct)
 
         /* we only want the usr tbl from the ctype in the types tbl */
         *ct = *(const struct ctype*) lua_touserdata(L, -1);
-        ct->const_mask = const_mask;
+        ct->const_mask = ct2.const_mask;
+        if (ct2.align_is_forced) {
+            ct->align_mask = ct2.align_mask;
+            ct->align_is_forced = 1;
+        }
         lua_getuservalue(L, -1);
         lua_replace(L, -2);
     }
@@ -1421,6 +1465,7 @@ const char* parse_argument(lua_State* L, struct parser* P, int ct_usr, struct ct
             }
             type->pointers++;
             type->const_mask <<= 1;
+            type->align_mask = PTR_ALIGN_MASK;
 
         } else if (tok.type == TOK_REFERENCE) {
             luaL_error(L, "NYI: c++ reference types");

@@ -107,50 +107,95 @@ EXPORT int print_b2(char* buf, _Bool val);
 int print_b(char* buf, _Bool val) {return sprintf(buf, "%s", val ? "true" : "false");}
 int print_b2(char* buf, _Bool val) {return sprintf(buf, "%s", val ? "true" : "false");}
 
-#define ALIGN_UP(TYPE, ALIGNMENT, SUFFIX) \
+#define OFFSETOF(STRUCT, MEMBER) ((int) ((char*) &STRUCT.MEMBER - (char*) &S - 1))
+
+#define ALIGN_UP(VALUE, ALIGNMENT, SUFFIX) \
     struct align_##ALIGNMENT##_##SUFFIX {   \
         char pad;                   \
-        TYPE v;                     \
+        VALUE;                       \
     };                              \
     EXPORT int print_align_##ALIGNMENT##_##SUFFIX(char* buf, struct align_##ALIGNMENT##_##SUFFIX* p);   \
     int print_align_##ALIGNMENT##_##SUFFIX(char* buf, struct align_##ALIGNMENT##_##SUFFIX* p) { \
-        return print_##SUFFIX(buf, p->v);                                   \
+        struct {char ch; struct align_##ALIGNMENT##_##SUFFIX v;} s; \
+        int off = sprintf(buf, "size %d offset %d align %d value ", \
+                (int) sizeof(s.v), \
+                (int) (((char*) &p->v) - (char*) p), \
+                (int) (((char*) &s.v) - (char*) &s)); \
+        return print_##SUFFIX(buf+off, p->v); \
     }
 
 #ifdef HAVE_COMPLEX
-#define COMPLEX_ALIGN(ALIGNMENT) \
-    ALIGN_UP(double complex, ALIGNMENT, dc) \
-    ALIGN_UP(float complex, ALIGNMENT, fc)
+#define COMPLEX_ALIGN(ALIGNMENT, ATTR) \
+    ALIGN_UP(ATTR(double complex), ALIGNMENT, dc) \
+    ALIGN_UP(ATTR(float complex), ALIGNMENT, fc)
 #else
-#define COMPLEX_ALIGN(ALIGNMENT)
+#define COMPLEX_ALIGN(ALIGNMENT, ATTR)
 #endif
 
-#define ALIGN2(ALIGNMENT)                   \
-    ALIGN_UP(uint16_t, ALIGNMENT, u16)      \
-    ALIGN_UP(uint32_t, ALIGNMENT, u32)      \
-    ALIGN_UP(uint64_t, ALIGNMENT, u64)      \
-    ALIGN_UP(float, ALIGNMENT, f)           \
-    ALIGN_UP(double, ALIGNMENT, d)          \
-    ALIGN_UP(const char*, ALIGNMENT, s)     \
-    ALIGN_UP(void*, ALIGNMENT, p)           \
-    ALIGN_UP(_Bool, ALIGNMENT, b)           \
-    ALIGN_UP(_Bool, ALIGNMENT, b2)          \
-    COMPLEX_ALIGN(ALIGNMENT)
+#define ALIGN2(ALIGNMENT, ATTR)                   \
+    ALIGN_UP(ATTR(uint16_t), ALIGNMENT, u16)      \
+    ALIGN_UP(ATTR(uint32_t), ALIGNMENT, u32)      \
+    ALIGN_UP(ATTR(uint64_t), ALIGNMENT, u64)      \
+    ALIGN_UP(ATTR(float), ALIGNMENT, f)           \
+    ALIGN_UP(ATTR(double), ALIGNMENT, d)          \
+    ALIGN_UP(ATTR(const char*), ALIGNMENT, s)     \
+    ALIGN_UP(ATTR(void*), ALIGNMENT, p)           \
+    ALIGN_UP(ATTR(_Bool), ALIGNMENT, b)           \
+    ALIGN_UP(ATTR(_Bool), ALIGNMENT, b2)          \
+    COMPLEX_ALIGN(ALIGNMENT, ATTR)
 
-ALIGN2(0)
+#define NO_ATTR(TYPE) TYPE v
+ALIGN2(0, NO_ATTR)
 
 #pragma pack(push)
 #pragma pack(1)
-ALIGN2(1)
+ALIGN2(1, NO_ATTR)
 #pragma pack(2)
-ALIGN2(2)
+ALIGN2(2, NO_ATTR)
 #pragma pack(4)
-ALIGN2(4)
+ALIGN2(4, NO_ATTR)
 #pragma pack(8)
-ALIGN2(8)
+ALIGN2(8, NO_ATTR)
 #pragma pack(16)
-ALIGN2(16)
+ALIGN2(16, NO_ATTR)
 #pragma pack(pop)
+
+#ifdef _MSC_VER
+#define ATTR_(TYPE, ALIGN) __declspec(align(ALIGN)) TYPE v
+#else
+#define ATTR_(TYPE, ALIGN) TYPE v __attribute__((aligned(ALIGN)))
+#endif
+
+#define ATTR1(TYPE) ATTR_(TYPE, 1)
+#define ATTR2(TYPE) ATTR_(TYPE, 2)
+#define ATTR4(TYPE) ATTR_(TYPE, 4)
+#define ATTR8(TYPE) ATTR_(TYPE, 8)
+#define ATTR16(TYPE) ATTR_(TYPE, 16)
+
+ALIGN2(attr_1, ATTR1)
+ALIGN2(attr_2, ATTR2)
+ALIGN2(attr_4, ATTR4)
+ALIGN2(attr_8, ATTR8)
+ALIGN2(attr_16, ATTR16)
+
+EXPORT int max_alignment();
+
+int max_alignment()
+{
+    struct {char pad; ATTR4(char);} s4;
+    struct {char pad; ATTR8(char);} s8;
+    struct {char pad; ATTR16(char);} s16;
+
+    if ((char*) &s4 + 4 > (char*) &s4.v) {
+        return 2;
+    } else if ((char*) &s8 + 8 > (char*) &s8.v) {
+        return 4;
+    } else if ((char*) &s16 + 16 > (char*) &s16.v) {
+        return 8;
+    } else {
+        return 16;
+    }
+}
 
 #ifdef _MSC_VER
 #define alignof(type) __alignof(type)

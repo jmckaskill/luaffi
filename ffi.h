@@ -331,6 +331,7 @@ struct ctype {
     unsigned is_bitfield : 1;
     unsigned has_bitfield : 1;
     unsigned is_jitted : 1;
+    unsigned align_is_forced : 1;
 };
 
 #ifdef _MSC_VER

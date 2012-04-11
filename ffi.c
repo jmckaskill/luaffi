@@ -1004,9 +1004,24 @@ static int ffi_sizeof(lua_State* L)
 
 static int ffi_alignof(lua_State* L)
 {
-    struct ctype ct;
+    struct ctype ct, mt;
+    lua_settop(L, 2);
     check_ctype(L, 1, &ct);
-    lua_pushnumber(L, ct.align_mask + 1);
+
+    /* if no member is specified then we return the alignment of the type */
+    if (lua_isnil(L, 2)) {
+        lua_pushnumber(L, ct.align_mask + 1);
+        return 1;
+    }
+
+    /* get the alignment of the member */
+    lua_pushvalue(L, 2);
+    if (get_member(L, -2, &ct, &mt) < 0) {
+        push_type_name(L, 3, &ct);
+        return luaL_error(L, "type %s has no member %s", lua_tostring(L, -1), lua_tostring(L, 2));
+    }
+
+    lua_pushnumber(L, mt.align_mask + 1);
     return 1;
 }
 

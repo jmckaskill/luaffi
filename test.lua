@@ -21,6 +21,7 @@ print('Running test')
 
 ffi.cdef [[
 bool have_complex();
+int max_alignment();
 
 int8_t add_i8(int8_t a, int8_t b);
 uint8_t add_u8(uint8_t a, uint8_t b);
@@ -155,6 +156,19 @@ struct align_ALIGN_SUFFIX {
 int print_align_ALIGN_SUFFIX(char* buf, struct align_ALIGN_SUFFIX* p);
 ]]
 
+local align_attr = [[
+#pragma pack(push)
+#pragma pack(2)
+/* check that attribute align overrides pack pragma */
+struct align_attr_ALIGN_SUFFIX {
+    char pad;
+    TYPE v __attribute__(align(ALIGN));
+};
+
+int print_align_attr_ALIGN_SUFFIX(char* buf, struct align_attr_ALIGN_SUFFIX* p);
+#pragma pack(pop)
+]]
+
 local palign = [[
 #pragma pack(push)
 #pragma pack(ALIGN)
@@ -191,9 +205,15 @@ local types = {
 
 local buf = ffi.new('char[256]')
 
-local function checkbuf(type, suffix, ret)
+local function checkbuf(type, ret)
     local str = tostring(test_values[type]):gsub('^cdata%b<>: ', '')
     check(ffi.string(buf), str)
+    check(ret, #str)
+end
+
+local function checkalign(type, v, ret)
+    local str = tostring(test_values[type]):gsub('^cdata%b<>: ', '')
+    check(ffi.string(buf), ('size %d offset %d align %d value %s'):format(ffi.sizeof(v), ffi.offsetof(v, 'v'), ffi.alignof(v, 'v'), str))
     check(ret, #str)
 end
 
@@ -225,22 +245,31 @@ for convention,c in pairs(dlls) do
     for suffix, type in pairs(types) do
         local test = test_values[type]
         --print('checkbuf', suffix, type, buf, test)
-        checkbuf(type, suffix, c['print_' .. suffix](buf, test))
+        checkbuf(type, c['print_' .. suffix](buf, test))
 
         if first then
             ffi.cdef(align:gsub('SUFFIX', suffix):gsub('TYPE', type):gsub('ALIGN', 0))
         end
 
         local v = ffi.new('struct align_0_' .. suffix, {0, test})
-        checkbuf(type, suffix, c['print_align_0_' .. suffix](buf, v))
+        checkalign(type, v, c['print_align_0_' .. suffix](buf, v))
 
         for _,align in ipairs{1,2,4,8,16} do
+            if align > c.max_alignment() then
+                break
+            end
+
             if first then
                 ffi.cdef(palign:gsub('SUFFIX', suffix):gsub('TYPE', type):gsub('ALIGN', align))
+                --print(align_attr:gsub('SUFFIX', suffix):gsub('TYPE', type):gsub('ALIGN', align))
+                ffi.cdef(align_attr:gsub('SUFFIX', suffix):gsub('TYPE', type):gsub('ALIGN', align))
             end
 
             local v = ffi.new('struct align_' .. align .. '_' .. suffix, {0, test})
-            checkbuf(type, suffix, c['print_align_' .. align .. '_' .. suffix](buf, v))
+            checkalign(type, v, c['print_align_' .. align .. '_' .. suffix](buf, v))
+
+            local v2 = ffi.new('struct align_attr_' .. align .. '_' .. suffix, {0, test})
+            checkalign(type, v2, c['print_align_attr_' .. align .. '_' .. suffix](buf, v2))
         end
     end
 
