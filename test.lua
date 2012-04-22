@@ -604,5 +604,7 @@ typedef int ALenum;
 __attribute__((dllimport)) void __attribute__((__cdecl__)) alEnable( ALenum capability );
 ]]
 
+check(ffi.sizeof('struct {char foo[alignof(uint64_t)];}'), ffi.alignof('uint64_t'))
+
 print('Test PASSED')
 

@@ -1934,7 +1934,13 @@ static int64_t calculate_constant2(lua_State* L, struct parser* P, struct token*
         require_token(L, P, tok);
         return -calculate_constant2(L, P, tok);
 
-    } else if (tok->type == TOK_TOKEN && IS_LITERAL(*tok, "sizeof")) {
+    } else if (tok->type == TOK_TOKEN &&
+            (IS_LITERAL(*tok, "sizeof")
+             || IS_LITERAL(*tok, "alignof")
+             || IS_LITERAL(*tok, "__alignof__")
+             || IS_LITERAL(*tok, "__alignof"))) {
+
+        bool issize = IS_LITERAL(*tok, "sizeof");
         struct ctype type;
 
         require_token(L, P, tok);
@@ -1953,7 +1959,7 @@ static int64_t calculate_constant2(lua_State* L, struct parser* P, struct token*
 
         next_token(L, P, tok);
 
-        return ctype_size(L, &type);
+        return issize ? ctype_size(L, &type) : type.align_mask + 1;
 
     } else {
         return calculate_constant1(L, P, tok);
