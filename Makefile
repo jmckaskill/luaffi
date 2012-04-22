@@ -47,7 +47,7 @@ test_cdecl.so: test.o
 	$(SOCC) $^ -o $@
 
 test_posix: test_cdecl.so $(MODSO)
-	$(LUA) test.lua
+	LD_LIBRARY_PATH=./ $(LUA) test.lua
 
 
 

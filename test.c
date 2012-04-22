@@ -43,6 +43,17 @@ bool have_complex()
 #endif
 }
 
+EXPORT bool is_msvc();
+
+bool is_msvc()
+{
+#ifdef _MSC_VER
+    return 1;
+#else
+    return 0;
+#endif
+}
+
 EXPORT int test_pow(int v);
 int test_pow(int v)
 { return v * v; }
@@ -157,8 +168,7 @@ ALIGN2(16, NO_ATTR)
 #ifdef _MSC_VER
 #define ATTR_(TYPE, ALIGN) __declspec(align(ALIGN)) TYPE v
 #else
-/*#define ATTR_(TYPE, ALIGN) TYPE v __attribute__((aligned(ALIGN)))*/
-#define ATTR_(TYPE, ALIGN) __attribute__((aligned(ALIGN))) TYPE v
+#define ATTR_(TYPE, ALIGN) TYPE v __attribute__((aligned(ALIGN)))
 #endif
 
 #define ATTR1(TYPE) ATTR_(TYPE, 1)
@@ -167,36 +177,11 @@ ALIGN2(16, NO_ATTR)
 #define ATTR8(TYPE) ATTR_(TYPE, 8)
 #define ATTR16(TYPE) ATTR_(TYPE, 16)
 
-#pragma pack(push)
-#pragma pack(1)
 ALIGN2(attr_1, ATTR1)
 ALIGN2(attr_2, ATTR2)
 ALIGN2(attr_4, ATTR4)
 ALIGN2(attr_8, ATTR8)
 ALIGN2(attr_16, ATTR16)
-#pragma pack(pop)
-
-EXPORT bool alignment_attribute_works(int align);
-
-/* GCC alignment attribute is broken */
-bool alignment_attribute_works(int align)
-{
-#pragma pack(push)
-#pragma pack(1)
-    struct {char pad; ATTR2(void*);} s2;
-    struct {char pad; ATTR4(void*);} s4;
-    struct {char pad; ATTR8(void*);} s8;
-    struct {char pad; ATTR16(void*);} s16;
-#pragma pack(pop)
-    switch (align) {
-    case 1: return 1;
-    case 2: return ((char*) &s2.v - (char*) &s2) == align;
-    case 4: return ((char*) &s4.v - (char*) &s4) == align;
-    case 8: return ((char*) &s8.v - (char*) &s8) == align;
-    case 16: return ((char*) &s16.v - (char*) &s16) == align;
-    default: return 0;
-    }
-}
 
 #ifdef _MSC_VER
 #define alignof(type) __alignof(type)

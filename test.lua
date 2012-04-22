@@ -20,9 +20,9 @@ end
 print('Running test')
 
 ffi.cdef [[
+bool is_msvc();
 bool have_complex();
 bool have_complex2() __asm("have_complex");
-bool alignment_attribute_works(int align);
 
 int8_t add_i8(int8_t a, int8_t b);
 uint8_t add_u8(uint8_t a, uint8_t b);
@@ -177,24 +177,6 @@ struct align_ALIGN_SUFFIX {
 int print_align_ALIGN_SUFFIX(char* buf, struct align_ALIGN_SUFFIX* p);
 ]]
 
-local align_attr = [[
-#pragma pack(push)
-#pragma pack(2)
-/* check that attribute align overrides pack pragma */
-struct align_attr_ALIGN_SUFFIX {
-    char pad;
-    TYPE v __attribute__(align(ALIGN));
-};
-
-struct align2_attr_ALIGN_SUFFIX {
-    char pad;
-    __declspec(aligned(ALIGN)) TYPE v;
-};
-
-int print_align_attr_ALIGN_SUFFIX(char* buf, struct align_attr_ALIGN_SUFFIX* p);
-#pragma pack(pop)
-]]
-
 local palign = [[
 #pragma pack(push)
 #pragma pack(ALIGN)
@@ -307,6 +289,22 @@ for convention,c in pairs(dlls) do
 
     check(c.have_complex(), c.have_complex2())
 
+    local align_attr = c.is_msvc() and [[
+        struct align_attr_ALIGN_SUFFIX {
+            char pad;
+            __declspec(align(ALIGN)) TYPE v;
+        };
+
+        int print_align_attr_ALIGN_SUFFIX(char* buf, struct align_attr_ALIGN_SUFFIX* p);
+        ]] or [[
+        struct align_attr_ALIGN_SUFFIX {
+            char pad;
+            TYPE v __attribute__(aligned(ALIGN));
+        };
+
+        int print_align_attr_ALIGN_SUFFIX(char* buf, struct align_attr_ALIGN_SUFFIX* p);
+        ]]
+
     for suffix, type in pairs(types) do
         local test = test_values[type]
         --print('checkbuf', suffix, type, buf, test)
@@ -325,15 +323,11 @@ for convention,c in pairs(dlls) do
                 ffi.cdef(align_attr:gsub('SUFFIX', suffix):gsub('TYPE', type):gsub('ALIGN', align))
             end
 
-            if c.alignment_attribute_works(align) then
-                local v = ffi.new('struct align_' .. align .. '_' .. suffix, {0, test})
-                checkalign(type, v, c['print_align_' .. align .. '_' .. suffix](buf, v))
+            local v = ffi.new('struct align_' .. align .. '_' .. suffix, {0, test})
+            checkalign(type, v, c['print_align_' .. align .. '_' .. suffix](buf, v))
 
-                local v2 = ffi.new('struct align_attr_' .. align .. '_' .. suffix, {0, test})
-                local v3 = ffi.new('struct align2_attr_' .. align .. '_' .. suffix, {0, test})
-                checkalign(type, v2, c['print_align_attr_' .. align .. '_' .. suffix](buf, v2))
-                checkalign(type, v3, c['print_align_attr_' .. align .. '_' .. suffix](buf, v2))
-            end
+            local v2 = ffi.new('struct align_attr_' .. align .. '_' .. suffix, {0, test})
+            checkalign(type, v2, c['print_align_attr_' .. align .. '_' .. suffix](buf, v2))
         end
     end
 

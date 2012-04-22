@@ -310,6 +310,7 @@ static void calculate_member_position(lua_State* L, struct parser* P, struct cty
 
         if (mt->is_variable_struct || mt->is_variable_array) {
             luaL_error(L, "NYI: variable sized members in unions");
+            return;
 
         } else if (mt->is_bitfield) {
             msize = (mt->align_mask + 1);
@@ -1007,25 +1008,26 @@ static int parse_attribute(lua_State* L, struct parser* P, struct token* tok, st
                     return luaL_error(L, "unexpected token in align on line %d", P->line);
                 }
 
-                /* TODO: strictly speaking __attribute__(aligned(#)) is only
-                 * supposed to increase alignment
+                /* __attribute__(aligned(#)) is only supposed to increase alignment
                  */
 
-                switch (tok->integer) {
-                /* TODO: atm we just leave this as it was, but is there a
-                 * better way of handling this
-                 */
-                case 0: break;
-                case 1: ct->align_mask = 0; break;
-                case 2: ct->align_mask = 1; break;
-                case 4: ct->align_mask = 3; break;
-                case 8: ct->align_mask = 7; break;
-                case 16: ct->align_mask = 15; break;
-                default:
-                    return luaL_error(L, "unsupported align size on line %d", P->line);
+                if (IS_LITERAL(*tok, "align") || tok->integer > ct->align_mask) {
+                    switch (tok->integer) {
+                    /* TODO: atm we just leave this as it was, but is there a
+                     * better way of handling this
+                     */
+                    case 0: break;
+                    case 1: ct->align_mask = 0; break;
+                    case 2: ct->align_mask = 1; break;
+                    case 4: ct->align_mask = 3; break;
+                    case 8: ct->align_mask = 7; break;
+                    case 16: ct->align_mask = 15; break;
+                    default:
+                        return luaL_error(L, "unsupported align size on line %d", P->line);
+                    }
+                    ct->align_is_forced = 1;
                 }
 
-                ct->align_is_forced = 1;
                 check_token(L, P, TOK_CLOSE_PAREN, NULL, "expected align(#) on line %d", P->line);
 
             } else if (IS_LITERAL(*tok, "packed")) {
