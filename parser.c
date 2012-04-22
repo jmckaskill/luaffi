@@ -989,7 +989,7 @@ static int parse_attribute(lua_State* L, struct parser* P, struct token* tok, st
             } else if (tok->type != TOK_TOKEN) {
                 /* ignore unknown symbols within parentheses */
 
-            } else if (IS_LITERAL(*tok, "align") || IS_LITERAL(*tok, "aligned")) {
+            } else if (IS_LITERAL(*tok, "align") || IS_LITERAL(*tok, "aligned") || IS_LITERAL(*tok, "__aligned__")) {
                 check_token(L, P, TOK_OPEN_PAREN, NULL, "expected align(#) on line %d", P->line);
 
                 require_token(L, P, tok);
@@ -1014,17 +1014,17 @@ static int parse_attribute(lua_State* L, struct parser* P, struct token* tok, st
 
                 check_token(L, P, TOK_CLOSE_PAREN, NULL, "expected align(#) on line %d", P->line);
 
-            } else if (IS_LITERAL(*tok, "packed")) {
+            } else if (IS_LITERAL(*tok, "packed") || IS_LITERAL(*tok, "__packed__")) {
                 ct->align_mask = 0;
                 ct->is_packed = 1;
 
-            } else if (IS_LITERAL(*tok, "cdecl")) {
+            } else if (IS_LITERAL(*tok, "cdecl") || IS_LITERAL(*tok, "__cdecl__")) {
                 ct->calling_convention = C_CALL;
 
-            } else if (IS_LITERAL(*tok, "fastcall")) {
+            } else if (IS_LITERAL(*tok, "fastcall") || IS_LITERAL(*tok, "__fastcall__")) {
                 ct->calling_convention = FAST_CALL;
 
-            } else if (IS_LITERAL(*tok, "stdcall")) {
+            } else if (IS_LITERAL(*tok, "stdcall") || IS_LITERAL(*tok, "__stdcall__")) {
                 ct->calling_convention = STD_CALL;
             }
             /* ignore unknown tokens within parentheses */

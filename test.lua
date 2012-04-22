@@ -558,5 +558,11 @@ check(tostring(1+3*i), '1+3i')
 check(tostring((1+3*i)*(2+4*i)), '-10+10i')
 check(tostring((3+2*i)*(3-2*i)), '13')
 
+-- Should ignore unknown attributes
+ffi.cdef [[
+typedef int ALenum;
+__attribute__((dllimport)) void __attribute__((__cdecl__)) alEnable( ALenum capability );
+]]
+
 print('Test PASSED')
 
