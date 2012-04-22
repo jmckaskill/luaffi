@@ -20,6 +20,20 @@ end
 print('Running test')
 
 ffi.cdef [[
+enum e8 {
+    FOO8,
+    BAR8,
+};
+enum e16 {
+    FOO16,
+    BAR16,
+    BIG16 = 2 << 14,
+};
+enum e32 {
+    FOO32,
+    BAR32,
+    BIG32 = 2 << 30,
+};
 int max_alignment();
 bool is_msvc();
 bool have_complex();
@@ -37,6 +51,9 @@ double add_d(double a, double b);
 float add_f(float a, float b);
 double complex add_dc(double complex a, double complex b);
 float complex add_fc(float complex a, float complex b);
+enum e8 inc_e8(enum e8);
+enum e16 inc_e16(enum e16);
+enum e32 inc_e32(enum e32);
 bool not_b(bool v);
 _Bool not_b2(_Bool v);
 
@@ -56,6 +73,9 @@ int print_f(char* buf, float val);
 int print_p(char* buf, void* val);
 int print_dc(char* buf, double complex val);
 int print_fc(char* buf, float complex val);
+int print_e8(char* buf, enum e8 val);
+int print_e16(char* buf, enum e16 val);
+int print_e32(char* buf, enum e32 val);
 int sprintf(char* buf, const char* format, ...);
 
 // Examples from MSDN
@@ -235,6 +255,9 @@ local test_values = {
     _Bool = false,
     ['float complex'] = 3+4*i,
     ['double complex'] = 5+6*i,
+    ['enum e8'] = ffi.C.FOO8,
+    ['enum e16'] = ffi.C.FOO16,
+    ['enum e32'] = ffi.C.FOO32,
 }
 
 local types = {
@@ -246,7 +269,10 @@ local types = {
     u32 = 'uint32_t',
     u16 = 'uint16_t',
     s = 'const char*',
-    p = 'void*'
+    p = 'void*',
+    e8 = 'enum e8',
+    e16 = 'enum e16',
+    e32 = 'enum e32',
 }
 
 local buf = ffi.new('char[256]')
@@ -258,6 +284,7 @@ local function checkbuf(type, ret)
 end
 
 local function checkalign(type, v, ret)
+    --print(v)
     local str = tostring(test_values[type]):gsub('^cdata%b<>: ', '')
     check(ffi.string(buf), ('size %d offset %d align %d value %s'):format(ffi.sizeof(v), ffi.offsetof(v, 'v'), ffi.alignof(v, 'v'), str))
     check(ret, #str)
@@ -277,6 +304,9 @@ for convention,c in pairs(dlls) do
     check(c.add_f(40, 32), 72)
     check(c.not_b(true), false)
     check(c.not_b2(false), true)
+    check(c.inc_e8(c.FOO8), c.BAR8)
+    check(c.inc_e16(c.FOO16), c.BAR16)
+    check(c.inc_e32(c.FOO32), c.BAR32)
 
     if c.have_complex() then
         check(c.add_dc(3+4*i, 4+5*i), 7+9*i)
@@ -396,6 +426,9 @@ for convention,c in pairs(dlls) do
     _Bool call_b(_Bool (*__cdecl func)(_Bool), _Bool arg);
     double complex call_dc(double complex (*__cdecl func)(double complex), double complex arg);
     float complex call_fc(float complex (*__cdecl func)(float complex), float complex arg);
+    enum e8 call_e8(enum e8 (*__cdecl func)(enum e8), enum e8 arg);
+    enum e16 call_e16(enum e16 (*__cdecl func)(enum e16), enum e16 arg);
+    enum e32 call_e32(enum e32 (*__cdecl func)(enum e32), enum e32 arg);
     ]]
 
     ffi.cdef(cbs:gsub('__cdecl', convention))
@@ -406,6 +439,9 @@ for convention,c in pairs(dlls) do
     assert(math.abs(c.call_f(function(a) return 2*a end, 3.2) - 6.4) < 0.000001)
     check(ffi.string(c.call_s(function(s) return s + u3 end, 'foobar')), 'bar')
     check(c.call_b(function(v) return not v end, true), false)
+    check(c.call_e8(function(v) return v + 1 end, c.FOO8), c.BAR8)
+    check(c.call_e16(function(v) return v + 1 end, c.FOO16), c.BAR16)
+    check(c.call_e32(function(v) return v + 1 end, c.FOO32), c.BAR32)
 
     if c.have_complex() then
         check(c.call_dc(function(v) return v + 2+3*i end, 4+6*i), 6+9*i)

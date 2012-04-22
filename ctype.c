@@ -154,7 +154,7 @@ void* push_cdata(lua_State* L, int ct_usr, const struct ctype* ct)
 #endif
 
 #if LUA_VERSION_NUM == 501
-    if (ct_usr && lua_isnil(L, ct_usr)) {
+    if (!ct_usr || lua_isnil(L, ct_usr)) {
         push_upval(L, &niluv_key);
         lua_setfenv(L, -2);
     }

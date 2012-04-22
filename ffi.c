@@ -362,6 +362,9 @@ int32_t check_enum(lua_State* L, int idx, int to_usr, const struct ctype* to_ct)
     case LUA_TNIL:
         return (int32_t) 0;
 
+    case LUA_TNUMBER:
+        return (int32_t) lua_tointeger(L, idx);
+
     default:
         goto err;
     }
@@ -2383,6 +2386,15 @@ static int cmodule_index(lua_State* L)
     }
     lua_pop(L, 1);
 
+    /* check the constants table */
+    push_upval(L, &constants_key);
+    lua_pushvalue(L, 2);
+    lua_rawget(L, -2);
+    if (!lua_isnil(L, -1)) {
+        return 1;
+    }
+    lua_pop(L, 2);
+
     funcname = luaL_checkstring(L, 2);
 
     /* find the function type */
@@ -2680,10 +2692,7 @@ static int setup_upvals(lua_State* L)
         libs[4] = LoadLibraryA("libdl.so");
 #endif
 
-        /* use the constants table as the base module's uv such that
-         * ffi.C.CONTSTANT looks up the constant correctly
-         */
-        push_upval(L, &constants_key);
+        lua_newtable(L);
         lua_setuservalue(L, -2);
 
         push_upval(L, &cmodule_mt_key);

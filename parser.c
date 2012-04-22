@@ -240,6 +240,8 @@ static int g_name_key;
 #define min(a,b) ((a) < (b) ? (a) : (b))
 #endif
 
+enum test {TEST};
+
 /* Parses an enum definition from after the open curly through to the close
  * curly. Expects the user table to be on the top of the stack
  */
@@ -296,6 +298,9 @@ static int parse_enum(lua_State* L, struct parser* P, struct ctype* type)
             return luaL_error(L, "unexpected token in enum at line %d", P->line);
         }
     }
+
+    type->base_size = sizeof(enum test);
+    type->align_mask = sizeof(enum test) - 1;
 
     assert(lua_gettop(L) == ct_usr);
     return 0;

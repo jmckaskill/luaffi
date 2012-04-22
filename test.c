@@ -32,6 +32,21 @@
 #define EXPORT EXTERN_C
 #endif
 
+enum e8 {
+    FOO8,
+    BAR8,
+};
+enum e16 {
+    FOO16,
+    BAR16,
+    BIG16 = 2 << 14,
+};
+enum e32 {
+    FOO32,
+    BAR32,
+    BIG32 = 2 << 30,
+};
+
 EXPORT bool have_complex();
 
 bool have_complex()
@@ -77,6 +92,13 @@ ADD(double complex, add_dc)
 ADD(float complex, add_fc)
 #endif
 
+EXPORT enum e8 inc_e8(enum e8 v);
+EXPORT enum e16 inc_e16(enum e16 v);
+EXPORT enum e32 inc_e32(enum e32 v);
+enum e8 inc_e8(enum e8 v) {return v+1;}
+enum e16 inc_e16(enum e16 v) {return v+1;}
+enum e32 inc_e32(enum e32 v) {return v+1;}
+
 EXPORT _Bool not_b(_Bool v);
 EXPORT _Bool not_b2(_Bool v);
 
@@ -99,6 +121,9 @@ PRINT(double, print_d, "g")
 PRINT(float, print_f, "g")
 PRINT(const char*, print_s, "s")
 PRINT(void*, print_p, "p")
+PRINT(enum e8, print_e8, "d")
+PRINT(enum e16, print_e16, "d")
+PRINT(enum e32, print_e32, "d")
 
 #ifdef HAVE_COMPLEX
 EXPORT int print_dc(char* buf, double complex val);
@@ -145,6 +170,9 @@ int print_b2(char* buf, _Bool val) {return sprintf(buf, "%s", val ? "true" : "fa
     ALIGN_UP(ATTR(double), ALIGNMENT, d)          \
     ALIGN_UP(ATTR(const char*), ALIGNMENT, s)     \
     ALIGN_UP(ATTR(void*), ALIGNMENT, p)           \
+    ALIGN_UP(ATTR(enum e8), ALIGNMENT, e8)        \
+    ALIGN_UP(ATTR(enum e16), ALIGNMENT, e16)      \
+    ALIGN_UP(ATTR(enum e32), ALIGNMENT, e32)      \
     ALIGN_UP(ATTR(_Bool), ALIGNMENT, b)           \
     ALIGN_UP(ATTR(_Bool), ALIGNMENT, b2)          \
     COMPLEX_ALIGN(ALIGNMENT, ATTR)
@@ -525,6 +553,9 @@ CALL(float, f)
 CALL(double, d)
 CALL(const char*, s)
 CALL(_Bool, b)
+CALL(enum e8, e8)
+CALL(enum e16, e16)
+CALL(enum e32, e32)
 #ifdef HAVE_COMPLEX
 CALL(double complex, dc)
 CALL(float complex, fc)
