@@ -189,6 +189,11 @@ ALIGN2(attr_16, ATTR16)
 #define alignof(type) __alignof__(type)
 #endif
 
+EXPORT int max_alignment();
+
+int max_alignment()
+{ return alignof(struct align_attr_16_p); }
+
 /* bit_fields1.cpp */
 /* compile with: /LD */
 struct Date {

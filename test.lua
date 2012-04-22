@@ -20,6 +20,7 @@ end
 print('Running test')
 
 ffi.cdef [[
+int max_alignment();
 bool is_msvc();
 bool have_complex();
 bool have_complex2() __asm("have_complex");
@@ -318,6 +319,10 @@ for convention,c in pairs(dlls) do
         checkalign(type, v, c['print_align_0_' .. suffix](buf, v))
 
         for _,align in ipairs{1,2,4,8,16} do
+            if align > c.max_alignment() then
+                break
+            end
+
             if first then
                 ffi.cdef(palign:gsub('SUFFIX', suffix):gsub('TYPE', type):gsub('ALIGN', align))
                 ffi.cdef(align_attr:gsub('SUFFIX', suffix):gsub('TYPE', type):gsub('ALIGN', align))
