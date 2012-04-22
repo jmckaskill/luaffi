@@ -22,7 +22,7 @@ print('Running test')
 ffi.cdef [[
 bool have_complex();
 bool have_complex2() __asm("have_complex");
-int max_alignment();
+bool alignment_attribute_works(int align);
 
 int8_t add_i8(int8_t a, int8_t b);
 uint8_t add_u8(uint8_t a, uint8_t b);
@@ -78,6 +78,24 @@ struct Date2 {
    unsigned nYear     : 8;    // 0..100 (8 bits)
 };
 
+// For checking the alignment of short bitfields
+struct Date3 {
+   char pad;
+   unsigned short nWeekDay  : 3;    // 0..7   (3 bits)
+   unsigned short nMonthDay : 6;    // 0..31  (6 bits)
+   unsigned short nMonth    : 5;    // 0..12  (5 bits)
+   unsigned short nYear     : 8;    // 0..100 (8 bits)
+};
+
+// For checking the alignment and container of int64 bitfields
+struct bit64 {
+    char pad;
+    uint64_t a : 15;
+    uint64_t b : 14;
+    uint64_t c : 13;
+    uint64_t d : 12;
+};
+
 // Examples from SysV X86 ABI
 struct sysv1 {
     int     j:5;
@@ -131,6 +149,8 @@ struct sysv7 {
 
 int print_date(size_t* sz, size_t* align, char* buf, struct Date* s);
 int print_date2(size_t* sz, size_t* align, char* buf, struct Date2* s);
+int print_date3(size_t* sz, size_t* align, char* buf, struct Date3* d);
+int print_bit64(size_t* sz, size_t* align, char* buf, struct bit64* d);
 int print_sysv1(size_t* sz, size_t* align, char* buf, struct sysv1* s);
 int print_sysv2(size_t* sz, size_t* align, char* buf, struct sysv2* s);
 int print_sysv3(size_t* sz, size_t* align, char* buf, struct sysv3* s);
@@ -166,6 +186,11 @@ struct align_attr_ALIGN_SUFFIX {
     TYPE v __attribute__(align(ALIGN));
 };
 
+struct align2_attr_ALIGN_SUFFIX {
+    char pad;
+    __declspec(aligned(ALIGN)) TYPE v;
+};
+
 int print_align_attr_ALIGN_SUFFIX(char* buf, struct align_attr_ALIGN_SUFFIX* p);
 #pragma pack(pop)
 ]]
@@ -175,6 +200,43 @@ local palign = [[
 #pragma pack(ALIGN)
 ]] .. align .. [[
 #pragma pack(pop)
+]]
+
+local bitfields = [[
+struct bcTNUM {
+    uintTNUM_t a : 3;
+    intTNUM_t b : 3;
+};
+struct blzTNUM {
+    uintTNUM_t a;
+    uintTNUM_t :0;
+    uintTNUM_t b;
+};
+int print_bcTNUM(size_t* sz, size_t* align, char* buf, struct bcTNUM* s);
+int print_blzTNUM(size_t* sz, size_t* align, char* buf, struct blzTNUM* s);
+]]
+
+local bitalign = [[
+struct ba_TNUM_BNUM {
+    char a;
+    uintTNUM_t b : BNUM;
+};
+struct bu_TNUM_BNUM {
+    char a;
+    uintTNUM_t :BNUM;
+    char b;
+};
+int print_ba_TNUM_BNUM(size_t* sz, size_t* align, char* buf, struct ba_TNUM_BNUM* s);
+]]
+
+local bitzero = [[
+struct bz_TNUM_ZNUM_BNUM {
+    uint8_t a;
+    uintTNUM_t b : 3;
+    uintZNUM_t :BNUM;
+    uintTNUM_t c : 3;
+};
+int print_bz_TNUM_ZNUM_BNUM(size_t* sz, size_t* align, char* buf, struct bz_TNUM_ZNUM_BNUM* s);
 ]]
 
 local i = ffi.C.i
@@ -258,33 +320,62 @@ for convention,c in pairs(dlls) do
         checkalign(type, v, c['print_align_0_' .. suffix](buf, v))
 
         for _,align in ipairs{1,2,4,8,16} do
-            if align > c.max_alignment() then
-                break
-            end
-
             if first then
                 ffi.cdef(palign:gsub('SUFFIX', suffix):gsub('TYPE', type):gsub('ALIGN', align))
-                --print(align_attr:gsub('SUFFIX', suffix):gsub('TYPE', type):gsub('ALIGN', align))
                 ffi.cdef(align_attr:gsub('SUFFIX', suffix):gsub('TYPE', type):gsub('ALIGN', align))
             end
 
-            local v = ffi.new('struct align_' .. align .. '_' .. suffix, {0, test})
-            checkalign(type, v, c['print_align_' .. align .. '_' .. suffix](buf, v))
+            if c.alignment_attribute_works(align) then
+                local v = ffi.new('struct align_' .. align .. '_' .. suffix, {0, test})
+                checkalign(type, v, c['print_align_' .. align .. '_' .. suffix](buf, v))
 
-            local v2 = ffi.new('struct align_attr_' .. align .. '_' .. suffix, {0, test})
-            checkalign(type, v2, c['print_align_attr_' .. align .. '_' .. suffix](buf, v2))
+                local v2 = ffi.new('struct align_attr_' .. align .. '_' .. suffix, {0, test})
+                local v3 = ffi.new('struct align2_attr_' .. align .. '_' .. suffix, {0, test})
+                checkalign(type, v2, c['print_align_attr_' .. align .. '_' .. suffix](buf, v2))
+                checkalign(type, v3, c['print_align_attr_' .. align .. '_' .. suffix](buf, v2))
+            end
         end
     end
 
     local psz = ffi.new('size_t[1]')
     local palign = ffi.new('size_t[1]')
     local function check_align(type, test, ret)
-        --print('check_align', type, test, ret, ffi.string(buf))
+        --print('check_align', type, test, ret, ffi.string(buf), psz[0], palign[0])
         check(ret, #test)
         check(test, ffi.string(buf))
-        --print(psz, psz[0], tonumber, ffi.number)
-        check(tonumber(psz[0]), ffi.sizeof(type))
         check(tonumber(palign[0]), ffi.alignof(type))
+        check(tonumber(psz[0]), ffi.sizeof(type))
+    end
+
+    for _, tnum in ipairs{8, 16, 32, 64} do
+        if first then
+            ffi.cdef(bitfields:gsub('TNUM',tnum))
+        end
+
+        check_align('struct bc'..tnum, '1 2', c['print_bc'..tnum](psz, palign, buf, {1,2}))
+        check_align('struct blz'..tnum, '1 2', c['print_blz'..tnum](psz, palign, buf, {1,2}))
+
+        for _, znum in ipairs{8, 16, 32, 64} do
+            for _, bnum in ipairs{7, 15, 31, 63} do
+                if bnum > znum then
+                    break
+                end
+                if first then
+                    ffi.cdef(bitzero:gsub('TNUM',tnum):gsub('ZNUM',znum):gsub('BNUM', bnum))
+                end
+                check_align('struct bz_'..tnum..'_'..znum..'_'..bnum, '1 2 3', c['print_bz_'..tnum..'_'..znum..'_'..bnum](psz, palign, buf, {1,2,3}))
+            end
+        end
+
+        for _, bnum in ipairs{7, 15, 31, 63} do
+            if bnum > tnum then
+                break
+            end
+            if first then
+                ffi.cdef(bitalign:gsub('TNUM',tnum):gsub('BNUM',bnum))
+            end
+            check_align('struct ba_'..tnum..'_'..bnum, '1 2', c['print_ba_'..tnum..'_'..bnum](psz, palign, buf, {1,2}))
+        end
     end
 
     check_align('struct Date', '1 2 3 4', c.print_date(psz, palign, buf, {1,2,3,4}))

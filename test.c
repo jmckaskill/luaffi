@@ -157,7 +157,8 @@ ALIGN2(16, NO_ATTR)
 #ifdef _MSC_VER
 #define ATTR_(TYPE, ALIGN) __declspec(align(ALIGN)) TYPE v
 #else
-#define ATTR_(TYPE, ALIGN) TYPE v __attribute__((aligned(ALIGN)))
+/*#define ATTR_(TYPE, ALIGN) TYPE v __attribute__((aligned(ALIGN)))*/
+#define ATTR_(TYPE, ALIGN) __attribute__((aligned(ALIGN))) TYPE v
 #endif
 
 #define ATTR1(TYPE) ATTR_(TYPE, 1)
@@ -166,28 +167,34 @@ ALIGN2(16, NO_ATTR)
 #define ATTR8(TYPE) ATTR_(TYPE, 8)
 #define ATTR16(TYPE) ATTR_(TYPE, 16)
 
+#pragma pack(push)
+#pragma pack(1)
 ALIGN2(attr_1, ATTR1)
 ALIGN2(attr_2, ATTR2)
 ALIGN2(attr_4, ATTR4)
 ALIGN2(attr_8, ATTR8)
 ALIGN2(attr_16, ATTR16)
+#pragma pack(pop)
 
-EXPORT int max_alignment();
+EXPORT bool alignment_attribute_works(int align);
 
-int max_alignment()
+/* GCC alignment attribute is broken */
+bool alignment_attribute_works(int align)
 {
-    struct {char pad; ATTR4(char);} s4;
-    struct {char pad; ATTR8(char);} s8;
-    struct {char pad; ATTR16(char);} s16;
-
-    if ((char*) &s4 + 4 > (char*) &s4.v) {
-        return 2;
-    } else if ((char*) &s8 + 8 > (char*) &s8.v) {
-        return 4;
-    } else if ((char*) &s16 + 16 > (char*) &s16.v) {
-        return 8;
-    } else {
-        return 16;
+#pragma pack(push)
+#pragma pack(1)
+    struct {char pad; ATTR2(void*);} s2;
+    struct {char pad; ATTR4(void*);} s4;
+    struct {char pad; ATTR8(void*);} s8;
+    struct {char pad; ATTR16(void*);} s16;
+#pragma pack(pop)
+    switch (align) {
+    case 1: return 1;
+    case 2: return ((char*) &s2.v - (char*) &s2) == align;
+    case 4: return ((char*) &s4.v - (char*) &s4) == align;
+    case 8: return ((char*) &s8.v - (char*) &s8) == align;
+    case 16: return ((char*) &s16.v - (char*) &s16) == align;
+    default: return 0;
     }
 }
 
@@ -339,9 +346,187 @@ int print_sysv7(size_t* sz, size_t* align, char* buf, struct sysv7* s) {
     return sprintf(buf, "%d %d %d %d %d", s->j, s->s, s->c, s->t, s->u);
 }
 
+/* Now some targeting bitfield tests */
+
+/* Bitfield alignment */
+#define BITALIGN(TNUM,BNUM) \
+    struct ba_##TNUM##_##BNUM { \
+        char a; \
+        uint##TNUM##_t b : BNUM; \
+    }; \
+    EXPORT int print_ba_##TNUM##_##BNUM(size_t* sz, size_t* align, char* buf, struct ba_##TNUM##_##BNUM* s); \
+    int print_ba_##TNUM##_##BNUM(size_t* sz, size_t* align, char* buf, struct ba_##TNUM##_##BNUM* s) { \
+        *sz = sizeof(struct ba_##TNUM##_##BNUM); \
+        *align = alignof(struct ba_##TNUM##_##BNUM); \
+        return sprintf(buf, "%d %d", (int) s->a, (int) s->b); \
+    }
+
+BITALIGN(8,7)
+BITALIGN(16,7)
+BITALIGN(16,15)
+BITALIGN(32,7)
+BITALIGN(32,15)
+BITALIGN(32,31)
+BITALIGN(64,7)
+BITALIGN(64,15)
+BITALIGN(64,31)
+BITALIGN(64,63)
+
+/* Do unsigned and signed coallesce */
+#define BITCOALESCE(NUM) \
+    struct bc##NUM { \
+        uint##NUM##_t a : 3; \
+        int##NUM##_t b : 3; \
+    }; \
+    EXPORT int print_bc##NUM(size_t* sz, size_t* align, char* buf, struct bc##NUM* s); \
+    int print_bc##NUM(size_t* sz, size_t* align, char* buf, struct bc##NUM* s) { \
+        *sz = sizeof(struct bc##NUM); \
+        *align = alignof(struct bc##NUM); \
+        return sprintf(buf, "%d %d", (int) s->a, (int) s->b); \
+    }
+
+BITCOALESCE(8)
+BITCOALESCE(16)
+BITCOALESCE(32)
+BITCOALESCE(64)
+
+// Do different sizes coallesce
+struct bdsz {
+    uint8_t a : 3;
+    uint16_t b : 3;
+    uint32_t c : 3;
+    uint64_t d : 3;
+};
+
+EXPORT int print_bdsz(size_t* sz, size_t* align, char* buf, struct bdsz* s);
+int print_bdsz(size_t* sz, size_t* align, char* buf, struct bdsz* s) {
+    *sz = sizeof(struct bdsz);
+    *align = alignof(struct bdsz);
+    return sprintf(buf, "%d %d %d %d", (int) s->a, (int) s->b, (int) s->c, (int) s->d);
+}
+
+// Does coallesence upgrade the storage unit
+struct bcup {
+    uint8_t a : 7;
+    uint16_t b : 9;
+    uint32_t c : 17;
+    uint64_t d : 33;
+};
+
+EXPORT int print_bcup(size_t* sz, size_t* align, char* buf, struct bcup* s);
+int print_bcup(size_t* sz, size_t* align, char* buf, struct bcup* s) {
+    *sz = sizeof(struct bcup);
+    *align = alignof(struct bcup);
+    return sprintf(buf, "%d %d %d %"PRIu64, (int) s->a, (int) s->b, (int) s->c, (uint64_t) s->d);
+}
+
+// Is unaligned access allowed
+struct buna {
+    uint32_t a : 31;
+    uint32_t b : 31;
+};
+
+EXPORT int print_buna(size_t* sz, size_t* align, char* buf, struct buna* s);
+int print_buna(size_t* sz, size_t* align, char* buf, struct buna* s) {
+    *sz = sizeof(struct buna);
+    *align = alignof(struct buna);
+    return sprintf(buf, "%d %d", (int) s->a, (int) s->b);
+}
+
+/* What does a lone :0 do */
+#define BITLONEZERO(NUM) \
+    struct blz##NUM { \
+        uint##NUM##_t a; \
+        uint##NUM##_t :0; \
+        uint##NUM##_t b; \
+    }; \
+    EXPORT int print_##blz##NUM(size_t* sz, size_t* align, char* buf, struct blz##NUM* s); \
+    int print_blz##NUM(size_t* sz, size_t* align, char* buf, struct blz##NUM* s) { \
+        *sz = sizeof(struct blz##NUM); \
+        *align = alignof(struct blz##NUM); \
+        return sprintf(buf, "%d %d", (int) s->a, (int) s->b); \
+    }
+
+BITLONEZERO(8)
+BITLONEZERO(16)
+BITLONEZERO(32)
+BITLONEZERO(64)
+
+/* What does a :0 or unnamed :# of the same or different type do */
+#define BITZERO(NUM, ZNUM, BNUM) \
+    struct bz_##NUM##_##ZNUM##_##BNUM { \
+        uint8_t a; \
+        uint##NUM##_t b : 3; \
+        uint##ZNUM##_t :BNUM; \
+        uint##NUM##_t c : 3; \
+    }; \
+    EXPORT int print_bz_##NUM##_##ZNUM##_##BNUM(size_t* sz, size_t* align, char* buf, struct bz_##NUM##_##ZNUM##_##BNUM* s); \
+    int print_bz_##NUM##_##ZNUM##_##BNUM(size_t* sz, size_t* align, char* buf, struct bz_##NUM##_##ZNUM##_##BNUM* s) { \
+        *sz = sizeof(struct bz_##NUM##_##ZNUM##_##BNUM); \
+        *align = alignof(struct bz_##NUM##_##ZNUM##_##BNUM); \
+        return sprintf(buf, "%d %d %d", (int) s->a, (int) s->b, (int) s->c); \
+    }
+
+BITZERO(8,8,0)
+BITZERO(8,8,7)
+BITZERO(8,16,0)
+BITZERO(8,16,7)
+BITZERO(8,16,15)
+BITZERO(8,32,0)
+BITZERO(8,32,7)
+BITZERO(8,32,15)
+BITZERO(8,32,31)
+BITZERO(8,64,0)
+BITZERO(8,64,7)
+BITZERO(8,64,15)
+BITZERO(8,64,31)
+BITZERO(8,64,63)
+BITZERO(16,8,0)
+BITZERO(16,8,7)
+BITZERO(16,16,0)
+BITZERO(16,16,7)
+BITZERO(16,16,15)
+BITZERO(16,32,0)
+BITZERO(16,32,7)
+BITZERO(16,32,15)
+BITZERO(16,32,31)
+BITZERO(16,64,0)
+BITZERO(16,64,7)
+BITZERO(16,64,15)
+BITZERO(16,64,31)
+BITZERO(16,64,63)
+BITZERO(32,8,0)
+BITZERO(32,8,7)
+BITZERO(32,16,0)
+BITZERO(32,16,7)
+BITZERO(32,16,15)
+BITZERO(32,32,0)
+BITZERO(32,32,7)
+BITZERO(32,32,15)
+BITZERO(32,32,31)
+BITZERO(32,64,0)
+BITZERO(32,64,7)
+BITZERO(32,64,15)
+BITZERO(32,64,31)
+BITZERO(32,64,63)
+BITZERO(64,8,0)
+BITZERO(64,8,7)
+BITZERO(64,16,0)
+BITZERO(64,16,7)
+BITZERO(64,16,15)
+BITZERO(64,32,0)
+BITZERO(64,32,7)
+BITZERO(64,32,15)
+BITZERO(64,32,31)
+BITZERO(64,64,0)
+BITZERO(64,64,7)
+BITZERO(64,64,15)
+BITZERO(64,64,31)
+BITZERO(64,64,63)
+
 #define CALL(TYPE, SUFFIX) \
     EXPORT TYPE call_##SUFFIX(TYPE (*func)(TYPE), TYPE arg); \
-    EXPORT TYPE call_##SUFFIX(TYPE (*func)(TYPE), TYPE arg) { \
+    TYPE call_##SUFFIX(TYPE (*func)(TYPE), TYPE arg) { \
         return func(arg); \
     }
 

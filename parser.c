@@ -301,30 +301,22 @@ static int parse_enum(lua_State* L, struct parser* P, struct ctype* type)
     return 0;
 }
 
-static int calculate_member_position(lua_State* L, struct parser* P, struct ctype* ct, struct ctype* mt, int* pbit_offset, int* pbits_left)
+static void calculate_member_position(lua_State* L, struct parser* P, struct ctype* ct, struct ctype* mt, int* pbit_offset, int* pbitfield_type)
 {
-    int malign = mt->align_mask;
-    int palign = min(P->align_mask, malign);
     int bit_offset = *pbit_offset;
-    int bits_left = *pbits_left;
-
-    if (mt->align_is_forced) {
-        palign = malign;
-        ct->align_is_forced = 1;
-    }
 
     if (ct->type == UNION_TYPE) {
         size_t msize;
 
         if (mt->is_variable_struct || mt->is_variable_array) {
-            return luaL_error(L, "NYI: variable sized members in unions");
+            luaL_error(L, "NYI: variable sized members in unions");
 
         } else if (mt->is_bitfield) {
             msize = (mt->align_mask + 1);
 #ifdef _WIN32
             /* MSVC has a bug where it doesn't update the alignment of
              * a union for bitfield members. */
-            malign = palign = 0;
+            mt->align_mask = 0;
 #endif
 
         } else if (mt->is_array) {
@@ -337,99 +329,108 @@ static int calculate_member_position(lua_State* L, struct parser* P, struct ctyp
         ct->base_size = max(ct->base_size, msize);
 
     } else if (mt->is_bitfield) {
-        int base_bits = (mt->align_mask + 1) * CHAR_BIT;
-
-#ifdef OS_OSX
-        /* OSX uses int containers for char and short bitfields, but doesn't
-         * change the member alignment */
-        if (base_bits < sizeof(int) * CHAR_BIT) {
-            base_bits = sizeof(int) * CHAR_BIT;
-            malign = sizeof(int) - 1;
-        }
-#endif
-
-#ifdef _WIN32
-        /* MSVC uses a separate storage unit for each size */
-        if (bit_offset + bits_left != base_bits) {
-            ct->base_size += (bit_offset + bits_left) / CHAR_BIT;
-            bits_left = bit_offset = 0;
-        }
-#else
-        /* GCC intermixes bitfields and normal members, so figure
-         * out the number of bits left by finding how many bits
-         * from the current offset to the next alignment boundary.
-         */
-        bits_left = (int) ((ALIGN_UP(ct->base_size + 1, malign) - ct->base_size) * CHAR_BIT) - bit_offset;
-#endif
-
         if (mt->has_member_name && mt->bit_size == 0) {
             luaL_error(L, "zero length bitfields must be unnamed on line %d", P->line);
         }
 
-        if (0 < mt->bit_size && (int) mt->bit_size <= bits_left) {
-            /* Use the current storage unit.  Use the nearest u64 boundary as
-             * the offset, this means the set/get code does not have to deal
-             * with misaligned access */
-            mt->offset = ALIGN_DOWN(ct->base_size, 7);
-            mt->bit_offset = bit_offset + (ct->base_size - mt->offset) * CHAR_BIT;
+#ifdef OS_OSX
+        /* OSX doesn't use containers and bitfields are not aligned. So
+         * bitfields never add any padding, except for :0 which still forces
+         * an alignment based off the type used with the :0 */
+        if (mt->bit_size) {
+            mt->offset = ct->base_size;
+            mt->bit_offset = bit_offset;
             bit_offset += mt->bit_size;
-            bits_left -= mt->bit_size;
-
+            ct->base_size += bit_offset / CHAR_BIT;
+            bit_offset = bit_offset % CHAR_BIT;
         } else {
-#ifndef _WIN32
-            /* GCC intermixes bitfields and normal members so just
-             * round up to the next byte
-             */
-            bits_left = CHAR_BIT - 1;
-#endif
-            /* finish up the current storage unit */
-            ct->base_size += (bit_offset + bits_left) / CHAR_BIT;
-            bit_offset = bits_left = 0;
+            ct->base_size += (bit_offset + CHAR_BIT - 1) / CHAR_BIT;
+            ct->base_size = ALIGN_UP(ct->base_size, mt->align_mask);
+            bit_offset = 0;
+        }
 
-            if (mt->bit_size) {
-                /* start a new storage unit */
-                ct->base_size = ALIGN_UP(ct->base_size, palign);
-                mt->offset = ALIGN_DOWN(ct->base_size, 7);
-                mt->bit_offset = (ct->base_size - mt->offset) * CHAR_BIT;
-                bit_offset = mt->bit_size;
-                bits_left = base_bits - mt->bit_size;
-#ifndef _WIN32
-            } else {
-                /* GCC uses :0 to force alignment to that type,
-                 * msvc uses it as an indicator to finish the
-                 * current storage unit (which we've already done)
-                 */
-                ct->base_size = ALIGN_UP(ct->base_size, palign);
-#endif
+        if (!mt->has_member_name) {
+            /* unnamed bitfields don't update the struct alignment */
+            mt->align_mask = 0;
+        }
+
+#elif defined _WIN32
+        /* MSVC uses a seperate storage unit for each size. This is aligned
+         * before the first bitfield. :0 finishes up the storage unit using
+         * the greater alignment of the storage unit or the type used with the
+         * :0. This is equivalent to the :0 always creating a new storage
+         * unit, but not necesserily using it yet.
+         */
+
+        if (*pbitfield_type == -1 && mt->bit_size == 0) {
+            /* :0 not after a bitfield are ignored */
+            return;
+        }
+
+        {
+            int different_storage = mt->align_mask != *pbitfield_type;
+            int no_room_left = bit_offset + mt->bit_size > (mt->align_mask + 1) * CHAR_BIT;
+
+            if (different_storage || no_room_left || !mt->bit_size) {
+                ct->base_size += (bit_offset + CHAR_BIT - 1) / CHAR_BIT;
+                bit_offset = 0;
+                if (*pbitfield_type >= 0) {
+                    ct->base_size = ALIGN_UP(ct->base_size, *pbitfield_type);
+                }
+                ct->base_size = ALIGN_UP(ct->base_size, mt->align_mask);
             }
         }
 
-#ifdef _WIN32
-        /* :0 bitfields don't update the struct alignment as they
-         * are just finishing the current storage unit. */
-        if (mt->bit_size == 0) {
-            malign = palign = 0;
-        }
-#else
-        /* unnamed bitfields don't update the struct alignment */
-        if (!mt->has_member_name) {
-            malign = palign = 0;
+        mt->bit_offset = bit_offset;
+        mt->offset = ct->base_size;
+
+        *pbitfield_type = mt->align_mask;
+        bit_offset += mt->bit_size;
+
+
+#elif defined __GNUC__
+        /* GCC tries to pack bitfields in as close as much as possible, but
+         * still making sure that they don't cross alignment boundaries.
+         * :0 forces an alignment based off the type used with the :0
+         */
+
+        int bits_used = (ct->base_size - ALIGN_DOWN(ct->base_size, mt->align_mask)) * CHAR_BIT + bit_offset;
+        int need_to_realign = bits_used + mt->bit_size > (mt->align_mask + 1) * CHAR_BIT;
+
+        if (!mt->bit_size || need_to_realign) {
+            ct->base_size += (bit_offset + CHAR_BIT - 1) / CHAR_BIT;
+            ct->base_size = ALIGN_UP(ct->base_size, mt->align_mask);
+            bit_offset = 0;
         }
 
-        /* GCC intermixes bitfields and normal members so just
-         * round up to the next byte
-         */
-        bits_left = CHAR_BIT - 1;
+        mt->bit_offset = bit_offset;
+        mt->offset = ct->base_size;
+
+        bit_offset += mt->bit_size;
+        ct->base_size += bit_offset / CHAR_BIT;
+        bit_offset = bit_offset % CHAR_BIT;
+
+        /* unnamed bitfields don't update the struct alignment */
+        if (!mt->has_member_name) {
+            mt->align_mask = 0;
+        }
+#else
+#error
 #endif
 
     } else {
-
         /* finish up the current bitfield storage unit */
-        ct->base_size += (bit_offset + bits_left) / CHAR_BIT;
-        bits_left = bit_offset = 0;
+        ct->base_size += (bit_offset + CHAR_BIT - 1) / CHAR_BIT;
+        bit_offset = 0;
 
-        mt->offset = ALIGN_UP(ct->base_size, palign);
-        ct->base_size = mt->offset;
+        if (*pbitfield_type >= 0) {
+            ct->base_size = ALIGN_UP(ct->base_size, *pbitfield_type);
+        }
+
+        *pbitfield_type = -1;
+
+        ct->base_size = ALIGN_UP(ct->base_size, mt->align_mask);
+        mt->offset = ct->base_size;
 
         if (mt->is_variable_array) {
             ct->is_variable_struct = 1;
@@ -450,17 +451,15 @@ static int calculate_member_position(lua_State* L, struct parser* P, struct ctyp
     }
 
     /* increase the outer struct/union alignment if needed */
-    if (palign > (int) ct->align_mask) {
-        ct->align_mask = palign;
+    if (mt->align_mask > (int) ct->align_mask) {
+        ct->align_mask = mt->align_mask;
     }
 
     if (mt->has_bitfield || mt->is_bitfield) {
         ct->has_bitfield = 1;
     }
 
-    *pbits_left = bits_left;
     *pbit_offset = bit_offset;
-    return 0;
 }
 
 static int copy_submembers(lua_State* L, int to_usr, int from_usr, const struct ctype* ft, int* midx)
@@ -622,7 +621,7 @@ static int calculate_struct_offsets(lua_State* L, struct parser* P, int ct_usr, 
     int midx = 1;
     int sz = (int) lua_rawlen(L, tmp_usr);
     int bit_offset = 0;
-    int bits_left = 0;
+    int bitfield_type = -1;
 
     ct_usr = lua_absindex(L, ct_usr);
     tmp_usr = lua_absindex(L, tmp_usr);
@@ -641,9 +640,10 @@ static int calculate_struct_offsets(lua_State* L, struct parser* P, int ct_usr, 
         lua_pushvalue(L, -2);
         lua_rawget(L, tmp_usr);
 
-        calculate_member_position(L, P, ct, &mt, &bit_offset, &bits_left);
+        calculate_member_position(L, P, ct, &mt, &bit_offset, &bitfield_type);
 
         if (mt.has_member_name) {
+            assert(!lua_isnil(L, -1));
             add_member(L, ct_usr, -1, -2, &mt, &midx);
 
         } else if (mt.type == STRUCT_TYPE || mt.type == UNION_TYPE) {
@@ -671,6 +671,26 @@ static int calculate_struct_offsets(lua_State* L, struct parser* P, int ct_usr, 
 
     ct->base_size = ALIGN_UP(ct->base_size, ct->align_mask);
     return 0;
+}
+
+/* copy over attributes that could be specified before the typedef eg
+ * __attribute__(packed) const type_t */
+static void instantiate_typedef(struct parser* P, struct ctype* tt, const struct ctype* ft)
+{
+    struct ctype pt = *tt;
+    *tt = *ft;
+
+    tt->const_mask = pt.const_mask;
+
+    if (pt.align_is_forced) {
+        tt->align_mask = pt.align_mask;
+        tt->align_is_forced = 1;
+    } else {
+        /* Instantiate the typedef in the current packing. This may be
+         * further updated if a pointer is added or another alignment
+         * attribute is applied. */
+        tt->align_mask = min(P->align_mask, tt->align_mask);
+    }
 }
 
 /* this parses a struct or union starting with the optional
@@ -727,7 +747,7 @@ static int parse_record(lua_State* L, struct parser* P, struct ctype* ct)
                 luaL_error(L, "type '%s' previously declared as '%s'", lua_tostring(L, -2), lua_tostring(L, -1));
             }
 
-            *ct = *prevt;
+            instantiate_typedef(P, ct, prevt);
 
             /* replace the ctype with its usr value */
             lua_getuservalue(L, -1);
@@ -972,8 +992,9 @@ static int parse_attribute(lua_State* L, struct parser* P, struct token* tok, st
                 require_token(L, P, tok);
 
                 if (tok->type == TOK_CLOSE_PAREN) {
-                    // TODO: atm we just leave this as it was, but is there a
-                    // better way of handling this?
+                    /* TODO: atm we just leave this as it was, but is there a
+                     * better way of handling this?
+                     */
                     put_back(P);
                     ct->align_is_forced = 1;
                     continue;
@@ -986,9 +1007,14 @@ static int parse_attribute(lua_State* L, struct parser* P, struct token* tok, st
                     return luaL_error(L, "unexpected token in align on line %d", P->line);
                 }
 
+                /* TODO: strictly speaking __attribute__(aligned(#)) is only
+                 * supposed to increase alignment
+                 */
+
                 switch (tok->integer) {
-                // TODO: atm we just leave this as it was, but is there a
-                // better way of handling this
+                /* TODO: atm we just leave this as it was, but is there a
+                 * better way of handling this
+                 */
                 case 0: break;
                 case 1: ct->align_mask = 0; break;
                 case 2: ct->align_mask = 1; break;
@@ -1090,7 +1116,6 @@ int parse_type(lua_State* L, struct parser* P, struct ctype* ct)
         parse_record(L, P, ct);
 
     } else {
-        struct ctype ct2 = *ct;
         put_back(P);
 
         /* lookup type */
@@ -1104,13 +1129,9 @@ int parse_type(lua_State* L, struct parser* P, struct ctype* ct)
             return luaL_error(L, "unknown type %s on line %d", lua_tostring(L, -1), P->line);
         }
 
+        instantiate_typedef(P, ct, (const struct ctype*) lua_touserdata(L, -1));
+
         /* we only want the usr tbl from the ctype in the types tbl */
-        *ct = *(const struct ctype*) lua_touserdata(L, -1);
-        ct->const_mask = ct2.const_mask;
-        if (ct2.align_is_forced) {
-            ct->align_mask = ct2.align_mask;
-            ct->align_is_forced = 1;
-        }
         lua_getuservalue(L, -1);
         lua_replace(L, -2);
     }
@@ -1465,9 +1486,14 @@ void parse_argument(lua_State* L, struct parser* P, int ct_usr, struct ctype* ty
             if (type->pointers == POINTER_MAX) {
                 luaL_error(L, "maximum number of pointer derefs reached - use a struct to break up the pointers");
             }
+
             type->pointers++;
             type->const_mask <<= 1;
-            type->align_mask = PTR_ALIGN_MASK;
+
+            /* __declspec(align(#)) may come before the type in a member */
+            if (!type->align_is_forced) {
+                type->align_mask = min(PTR_ALIGN_MASK, P->align_mask);
+            }
 
         } else if (tok.type == TOK_REFERENCE) {
             luaL_error(L, "NYI: c++ reference types");
@@ -1482,7 +1508,7 @@ void parse_argument(lua_State* L, struct parser* P, int ct_usr, struct ctype* ty
 
             memset(type, 0, sizeof(*type));
             type->base_size = sizeof(void (*)());
-            type->align_mask = FUNCTION_ALIGN_MASK;
+            type->align_mask = min(FUNCTION_ALIGN_MASK, P->align_mask);
             type->type = FUNCTION_TYPE;
             type->calling_convention = ret_type.calling_convention;
             type->is_defined = 1;
@@ -1734,12 +1760,12 @@ static int parse_root(lua_State* L, struct parser* P)
                     luaL_error(L, "pack directive with invalid pack size on line %d", P->line);
                 }
 
-                P->align_mask = (int) (tok.integer - 1);
+                P->align_mask = (unsigned) (tok.integer - 1);
                 check_token(L, P, TOK_CLOSE_PAREN, "", "invalid pack directive on line %d", P->line);
 
             } else if (tok.type == TOK_TOKEN && IS_LITERAL(tok, "push")) {
                 int line = P->line;
-                int previous_alignment = P->align_mask;
+                unsigned previous_alignment = P->align_mask;
 
                 check_token(L, P, TOK_CLOSE_PAREN, "", "invalid pack directive on line %d", P->line);
 

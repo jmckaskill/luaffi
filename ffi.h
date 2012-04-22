@@ -190,7 +190,7 @@ struct parser {
     int line;
     const char* next;
     const char* prev;
-    int align_mask;
+    unsigned align_mask;
 };
 
 struct page {
