@@ -91,7 +91,7 @@ void push_ctype(lua_State* L, int ct_usr, const struct ctype* ct)
 
 #if LUA_VERSION_NUM == 501
     if (lua_isnil(L, ct_usr)) {
-        push_upval(L, &niluv_key);
+        push_niluv(L);
         lua_setfenv(L, -2);
     }
 #endif
@@ -226,13 +226,13 @@ void* to_cdata(lua_State* L, int idx, struct ctype* ct)
 
     ct->type = INVALID_TYPE;
     if (!lua_isuserdata(L, idx) || !lua_getmetatable(L, idx)) {
-        lua_pushnil(L);
+        push_niluv(L);
         return NULL;
     }
 
     if (!equals_upval(L, -1, &cdata_mt_key)) {
         lua_pop(L, 1); /* mt */
-        lua_pushnil(L);
+        push_niluv(L);
         return NULL;
     }
 

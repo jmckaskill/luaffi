@@ -384,20 +384,20 @@ static void* check_pointer(lua_State* L, int idx, struct ctype* ct)
     case LUA_TNIL:
         ct->type = VOID_TYPE;
         ct->is_null = 1;
-        lua_pushnil(L);
+        push_niluv(L);
         return NULL;
 
     case LUA_TLIGHTUSERDATA:
         ct->type = VOID_TYPE;
-        lua_pushnil(L);
+        push_niluv(L);
         return lua_touserdata(L, idx);
 
     case LUA_TSTRING:
-        ct->type = INT8_TYPE;
+        ct->type = CHAR_TYPE;
         ct->is_array = 1;
         ct->base_size = 1;
         ct->const_mask = 2;
-        lua_pushnil(L);
+        push_niluv(L);
         return (void*) lua_tolstring(L, idx, &ct->array_size);
 
     case LUA_TUSERDATA:
@@ -406,7 +406,6 @@ static void* check_pointer(lua_State* L, int idx, struct ctype* ct)
         if (ct->type == INVALID_TYPE) {
             /* some other type of user data */
             ct->type = VOID_TYPE;
-            lua_pushnil(L);
             return lua_touserdata(L, idx);
         } else if (ct->pointers || ct->type == STRUCT_TYPE || ct->type == UNION_TYPE) {
             return p;
@@ -2587,7 +2586,7 @@ static void push_builtin(lua_State* L, struct ctype* ct, const char* name, int t
     ct->is_defined = 1;
 
     push_upval(L, &types_key);
-    lua_pushnil(L);
+    push_niluv(L);
     push_ctype(L, -1, ct);
 
     /* stack is at +3: types, usr (nil), ctype */

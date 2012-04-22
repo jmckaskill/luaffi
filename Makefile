@@ -1,14 +1,12 @@
 .PHONY: all clean test
 
-PKG_CONFIG=/opt/local/bin/pkg-config
-#LUA=/opt/local/bin/lua
-LUA=../lua-5.2.0/src/lua
+PKG_CONFIG=pkg-config
+LUA=lua
 
-#LUA_CFLAGS=`$(PKG_CONFIG) --cflags lua5.1 2>/dev/null || $(PKG_CONFIG) --cflags lua`
-LUA_CFLAGS=-I../lua-5.2.0/src
+LUA_CFLAGS=`$(PKG_CONFIG) --cflags lua5.1 2>/dev/null || $(PKG_CONFIG) --cflags lua`
 SOCFLAGS=-fPIC
 SOCC=$(CC) -shared $(SOCFLAGS)
-CFLAGS=-O2 -fPIC -g -Wall -Werror $(LUA_CFLAGS) -fvisibility=hidden -Wno-unused-function --std=gnu99
+CFLAGS=-fPIC -g -Wall -Werror $(LUA_CFLAGS) -fvisibility=hidden -Wno-unused-function --std=gnu99
 
 MODNAME=ffi
 MODSO=$(MODNAME).so

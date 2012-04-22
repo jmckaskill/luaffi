@@ -239,6 +239,12 @@ extern int next_unnamed_key;
 extern int niluv_key;
 extern int asmname_key;
 
+#if LUA_VERSION_NUM == 501
+#define push_niluv(L) push_upval(L, &niluv_key)
+#else
+#define push_niluv(L) lua_pushnil(L)
+#endif
+
 int equals_upval(lua_State* L, int idx, int* key);
 void push_upval(lua_State* L, int* key);
 void set_upval(lua_State* L, int* key);
@@ -282,6 +288,8 @@ enum {
     STRUCT_TYPE,
     FUNCTION_TYPE,
 };
+
+#define CHAR_TYPE ((((char) -1) > 0) ? UINT8_TYPE : INT8_TYPE)
 
 #define IS_CHAR(type) ((type) == INT8_TYPE || (type) == UINT8_TYPE)
 #define IS_COMPLEX(type) ((type) == COMPLEX_FLOAT_TYPE || (type) == COMPLEX_DOUBLE_TYPE)
