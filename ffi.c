@@ -2065,6 +2065,32 @@ err:
     return luaL_error(L, "trying to compare incompatible types %s and %s", lua_tostring(L, -2), lua_tostring(L, -1));
 }
 
+static const char* etype_tostring(int type)
+{
+    switch (type) {
+    case VOID_TYPE: return "void";
+    case DOUBLE_TYPE: return "double";
+    case FLOAT_TYPE: return "float";
+    case COMPLEX_DOUBLE_TYPE: return "complex double";
+    case COMPLEX_FLOAT_TYPE: return "complex float";
+    case BOOL_TYPE: return "bool";
+    case INT8_TYPE: return "int8";
+    case INT16_TYPE: return "int16";
+    case INT32_TYPE: return "int32";
+    case INT64_TYPE: return "int64";
+    case UINT8_TYPE: return "uint8";
+    case UINT16_TYPE: return "uint16";
+    case UINT32_TYPE: return "uint32";
+    case UINT64_TYPE: return "uint64";
+    case UINTPTR_TYPE: return "uintptr";
+    case ENUM_TYPE: return "enum";
+    case UNION_TYPE: return "union";
+    case STRUCT_TYPE: return "struct";
+    case FUNCTION_TYPE: return "func";
+    default: return "invalid";
+    }
+}
+
 static int ctype_tostring(lua_State* L)
 {
     struct ctype ct;
@@ -2073,7 +2099,45 @@ static int ctype_tostring(lua_State* L)
     check_ctype(L, 1, &ct);
     assert(lua_gettop(L) == 2);
     push_type_name(L, -1, &ct);
-    lua_pushfstring(L, "ctype<%s>", lua_tostring(L, -1));
+#if 1
+    lua_pushfstring(L, "ctype<%s> %p", lua_tostring(L, -1), lua_topointer(L, 1));
+#else
+    lua_pushfstring(L, "ctype<%s> %p sz %d %d %d align %d %d ptr %d %d %d type %s %d %d %d name %d call %d %d var %d %d %d bit %d %d %d %d jit %d",
+            lua_tostring(L, -1),
+            lua_topointer(L, 1),
+            /* sz */
+            ct.base_size,
+            ct.array_size,
+            ct.offset,
+            /* align */
+            ct.align_mask,
+            ct.align_is_forced,
+            /* ptr */
+            ct.is_array,
+            ct.pointers,
+            ct.const_mask,
+            /* type */
+            etype_tostring(ct.type),
+            ct.is_reference,
+            ct.is_defined,
+            ct.is_null,
+            /* name */
+            ct.has_member_name,
+            /* call */
+            ct.calling_convention,
+            ct.has_var_arg,
+            /* var */
+            ct.is_variable_array,
+            ct.is_variable_struct,
+            ct.variable_size_known,
+            /* bit */
+            ct.is_bitfield,
+            ct.has_bitfield,
+            ct.bit_offset,
+            ct.bit_size,
+            /* jit */
+            ct.is_jitted);
+#endif
 
     return 1;
 }
@@ -2384,8 +2448,6 @@ static int jit_gc(lua_State* L)
 static int ffi_debug(lua_State* L)
 {
     lua_newtable(L);
-
-    lua_newtable(L);
     push_upval(L, &ctype_mt_key);
     lua_setfield(L, -2, "ctype_mt");
     push_upval(L, &cdata_mt_key);
@@ -2394,15 +2456,10 @@ static int ffi_debug(lua_State* L)
     lua_setfield(L, -2, "cmodule_mt");
     push_upval(L, &constants_key);
     lua_setfield(L, -2, "constants");
-    lua_rawseti(L, -2, 1);
-
-    lua_newtable(L);
     push_upval(L, &types_key);
     lua_setfield(L, -2, "types");
-    lua_rawseti(L, -2, 2);
-
-    /*push_upval(L, &jit_key);
-    lua_setfield(L, -2, "jit");*/
+    push_upval(L, &jit_key);
+    lua_setfield(L, -2, "jit");
     push_upval(L, &gc_key);
     lua_setfield(L, -2, "gc");
     push_upval(L, &callbacks_key);
