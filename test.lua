@@ -305,6 +305,7 @@ for convention,c in pairs(dlls) do
     check(c.not_b(true), false)
     check(c.not_b2(false), true)
     check(c.inc_e8(c.FOO8), c.BAR8)
+    check(c.inc_e8('FOO8'), c.BAR8)
     check(c.inc_e16(c.FOO16), c.BAR16)
     check(c.inc_e32(c.FOO32), c.BAR32)
 
