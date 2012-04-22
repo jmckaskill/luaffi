@@ -361,8 +361,11 @@ for convention,c in pairs(dlls) do
             local v = ffi.new('struct align_' .. align .. '_' .. suffix, {0, test})
             checkalign(type, v, c['print_align_' .. align .. '_' .. suffix](buf, v))
 
-            local v2 = ffi.new('struct align_attr_' .. align .. '_' .. suffix, {0, test})
-            checkalign(type, v2, c['print_align_attr_' .. align .. '_' .. suffix](buf, v2))
+            -- MSVC doesn't support aligned attributes on enums
+            if not type:match('^enum e[0-9]*$') or not c.is_msvc() then
+                local v2 = ffi.new('struct align_attr_' .. align .. '_' .. suffix, {0, test})
+                checkalign(type, v2, c['print_align_attr_' .. align .. '_' .. suffix](buf, v2))
+            end
         end
     end
 

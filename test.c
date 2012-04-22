@@ -162,6 +162,18 @@ int print_b2(char* buf, _Bool val) {return sprintf(buf, "%s", val ? "true" : "fa
 #define COMPLEX_ALIGN(ALIGNMENT, ATTR)
 #endif
 
+/* MSVC doesn't support __declspec(aligned(#)) on enums see C4329 */
+#define ENUM_ALIGN2(ALIGNMENT, ATTR) \
+    ALIGN_UP(ATTR(enum e8), ALIGNMENT, e8)        \
+    ALIGN_UP(ATTR(enum e16), ALIGNMENT, e16)      \
+    ALIGN_UP(ATTR(enum e32), ALIGNMENT, e32)      \
+
+#ifdef _MSC_VER
+#define ENUM_ALIGN(ALIGNMENT, ATTR)
+#else
+#define ENUM_ALIGN(ALIGNMENT, ATTR) ENUM_ALIGN2(ALIGNMENT, ATTR)
+#endif
+
 #define ALIGN2(ALIGNMENT, ATTR)                   \
     ALIGN_UP(ATTR(uint16_t), ALIGNMENT, u16)      \
     ALIGN_UP(ATTR(uint32_t), ALIGNMENT, u32)      \
@@ -170,27 +182,35 @@ int print_b2(char* buf, _Bool val) {return sprintf(buf, "%s", val ? "true" : "fa
     ALIGN_UP(ATTR(double), ALIGNMENT, d)          \
     ALIGN_UP(ATTR(const char*), ALIGNMENT, s)     \
     ALIGN_UP(ATTR(void*), ALIGNMENT, p)           \
-    ALIGN_UP(ATTR(enum e8), ALIGNMENT, e8)        \
-    ALIGN_UP(ATTR(enum e16), ALIGNMENT, e16)      \
-    ALIGN_UP(ATTR(enum e32), ALIGNMENT, e32)      \
     ALIGN_UP(ATTR(_Bool), ALIGNMENT, b)           \
     ALIGN_UP(ATTR(_Bool), ALIGNMENT, b2)          \
+    ENUM_ALIGN(ALIGNMENT, ATTR)                   \
     COMPLEX_ALIGN(ALIGNMENT, ATTR)
 
 #define NO_ATTR(TYPE) TYPE v
-ALIGN2(0, NO_ATTR)
+
+#ifdef _MSC_VER
+#define ALIGN_NO_ATTR(ALIGNMENT) \
+    ALIGN2(ALIGNMENT, NO_ATTR) \
+    ENUM_ALIGN2(ALIGNMENT, NO_ATTR)
+#else
+#define ALIGN_NO_ATTR(ALIGNMENT) \
+    ALIGN2(ALIGNMENT, NO_ATTR)
+#endif
+
+ALIGN_NO_ATTR(0)
 
 #pragma pack(push)
 #pragma pack(1)
-ALIGN2(1, NO_ATTR)
+ALIGN_NO_ATTR(1)
 #pragma pack(2)
-ALIGN2(2, NO_ATTR)
+ALIGN_NO_ATTR(2)
 #pragma pack(4)
-ALIGN2(4, NO_ATTR)
+ALIGN_NO_ATTR(4)
 #pragma pack(8)
-ALIGN2(8, NO_ATTR)
+ALIGN_NO_ATTR(8)
 #pragma pack(16)
-ALIGN2(16, NO_ATTR)
+ALIGN_NO_ATTR(16)
 #pragma pack(pop)
 
 #ifdef _MSC_VER
