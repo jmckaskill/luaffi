@@ -219,8 +219,7 @@ struct jit {
 
 /* struct cdata/struct ctype */
 
-struct ptr_align {char ch; void* v;};
-#define PTR_ALIGN_MASK (((uintptr_t) &((struct ptr_align*) NULL)->v) - 1)
+#define PTR_ALIGN_MASK (sizeof(void*) - 1)
 #define FUNCTION_ALIGN_MASK (sizeof(void (*)()) - 1)
 #define DEFAULT_ALIGN_MASK 7
 
@@ -305,18 +304,17 @@ enum {
  * ton of them on the stack, we try and minimise its size.
  */
 struct ctype {
+    size_t base_size; /* size of the base type in bytes */
+
     union {
+        /* valid if is_bitfield */
         struct {
-            /* size of bitfield in bits - valid if is_bitfield */
+            /* size of bitfield in bits */
             unsigned bit_size : 7;
             /* offset within the current byte between 0-63 */
             unsigned bit_offset : 6;
         };
-        /* size of the base type in bytes - valid if !is_bitfield */
-        size_t base_size;
-    };
-    union {
-        /* Valid if is_array and !is_variable_struct and !is_variable_array */
+        /* Valid if is_array */
         size_t array_size;
         /* Valid for is_variable_struct or is_variable_array. If
          * variable_size_known (only used for is_variable_struct) then this is

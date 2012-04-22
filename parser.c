@@ -334,28 +334,7 @@ static void calculate_member_position(lua_State* L, struct parser* P, struct cty
             luaL_error(L, "zero length bitfields must be unnamed on line %d", P->line);
         }
 
-#ifdef OS_OSX
-        /* OSX doesn't use containers and bitfields are not aligned. So
-         * bitfields never add any padding, except for :0 which still forces
-         * an alignment based off the type used with the :0 */
-        if (mt->bit_size) {
-            mt->offset = ct->base_size;
-            mt->bit_offset = bit_offset;
-            bit_offset += mt->bit_size;
-            ct->base_size += bit_offset / CHAR_BIT;
-            bit_offset = bit_offset % CHAR_BIT;
-        } else {
-            ct->base_size += (bit_offset + CHAR_BIT - 1) / CHAR_BIT;
-            ct->base_size = ALIGN_UP(ct->base_size, mt->align_mask);
-            bit_offset = 0;
-        }
-
-        if (!mt->has_member_name) {
-            /* unnamed bitfields don't update the struct alignment */
-            mt->align_mask = 0;
-        }
-
-#elif defined _WIN32
+#if defined _WIN32
         /* MSVC uses a seperate storage unit for each size. This is aligned
          * before the first bitfield. :0 finishes up the storage unit using
          * the greater alignment of the storage unit or the type used with the
@@ -388,6 +367,26 @@ static void calculate_member_position(lua_State* L, struct parser* P, struct cty
         *pbitfield_type = mt->align_mask;
         bit_offset += mt->bit_size;
 
+#elif defined OS_OSX
+        /* OSX doesn't use containers and bitfields are not aligned. So
+         * bitfields never add any padding, except for :0 which still forces
+         * an alignment based off the type used with the :0 */
+        if (mt->bit_size) {
+            mt->offset = ct->base_size;
+            mt->bit_offset = bit_offset;
+            bit_offset += mt->bit_size;
+            ct->base_size += bit_offset / CHAR_BIT;
+            bit_offset = bit_offset % CHAR_BIT;
+        } else {
+            ct->base_size += (bit_offset + CHAR_BIT - 1) / CHAR_BIT;
+            ct->base_size = ALIGN_UP(ct->base_size, mt->align_mask);
+            bit_offset = 0;
+        }
+
+        if (!mt->has_member_name) {
+            /* unnamed bitfields don't update the struct alignment */
+            mt->align_mask = 0;
+        }
 
 #elif defined __GNUC__
         /* GCC tries to pack bitfields in as close as much as possible, but
@@ -396,7 +395,7 @@ static void calculate_member_position(lua_State* L, struct parser* P, struct cty
          */
 
         int bits_used = (ct->base_size - ALIGN_DOWN(ct->base_size, mt->align_mask)) * CHAR_BIT + bit_offset;
-        int need_to_realign = bits_used + mt->bit_size > (mt->align_mask + 1) * CHAR_BIT;
+        int need_to_realign = bits_used + mt->bit_size > mt->base_size * CHAR_BIT;
 
         if (!mt->bit_size || need_to_realign) {
             ct->base_size += (bit_offset + CHAR_BIT - 1) / CHAR_BIT;

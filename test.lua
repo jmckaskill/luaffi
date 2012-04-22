@@ -335,10 +335,10 @@ for convention,c in pairs(dlls) do
     local palign = ffi.new('size_t[1]')
     local function check_align(type, test, ret)
         --print('check_align', type, test, ret, ffi.string(buf), psz[0], palign[0])
-        check(ret, #test)
-        check(test, ffi.string(buf))
         check(tonumber(palign[0]), ffi.alignof(type))
         check(tonumber(psz[0]), ffi.sizeof(type))
+        check(ret, #test)
+        check(test, ffi.string(buf))
     end
 
     for _, tnum in ipairs{8, 16, 32, 64} do
