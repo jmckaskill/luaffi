@@ -323,7 +323,7 @@ struct ctype {
         size_t variable_increment;
     };
     size_t offset;
-    unsigned align_mask : 4; /* as align bytes - 1 eg 7 gives 8 byte alignment */
+    unsigned align_mask : 4; /* as (align bytes - 1) eg 7 gives 8 byte alignment */
     unsigned pointers : POINTER_BITS; /* number of dereferences to get to the base type including +1 for arrays */
     unsigned const_mask : POINTER_MAX + 1; /* const pointer mask, LSB is current pointer, +1 for the whether the base type is const */
     unsigned type : 5; /* value given by type enum above */
@@ -340,7 +340,7 @@ struct ctype {
     unsigned is_bitfield : 1;
     unsigned has_bitfield : 1;
     unsigned is_jitted : 1;
-    unsigned align_is_forced : 1;
+    unsigned is_packed : 1;
 };
 
 #ifdef _MSC_VER

@@ -397,7 +397,7 @@ static void calculate_member_position(lua_State* L, struct parser* P, struct cty
         int bits_used = (ct->base_size - ALIGN_DOWN(ct->base_size, mt->align_mask)) * CHAR_BIT + bit_offset;
         int need_to_realign = bits_used + mt->bit_size > mt->base_size * CHAR_BIT;
 
-        if (!mt->bit_size || need_to_realign) {
+        if (!mt->is_packed && (!mt->bit_size || need_to_realign)) {
             ct->base_size += (bit_offset + CHAR_BIT - 1) / CHAR_BIT;
             ct->base_size = ALIGN_UP(ct->base_size, mt->align_mask);
             bit_offset = 0;
@@ -681,15 +681,16 @@ static void instantiate_typedef(struct parser* P, struct ctype* tt, const struct
     *tt = *ft;
 
     tt->const_mask = pt.const_mask;
+    tt->is_packed = pt.is_packed;
 
-    if (pt.align_is_forced) {
-        tt->align_mask = pt.align_mask;
-        tt->align_is_forced = 1;
+    if (tt->is_packed) {
+        tt->align_mask = 0;
     } else {
         /* Instantiate the typedef in the current packing. This may be
          * further updated if a pointer is added or another alignment
-         * attribute is applied. */
-        tt->align_mask = min(P->align_mask, tt->align_mask);
+         * attribute is applied. If pt.align_mask is already non-zero than an
+         * increased alignment via __declspec(aligned(#)) has been set. */
+        tt->align_mask = max(min(P->align_mask, tt->align_mask), pt.align_mask);
     }
 }
 
@@ -989,33 +990,18 @@ static int parse_attribute(lua_State* L, struct parser* P, struct token* tok, st
                 /* ignore unknown symbols within parentheses */
 
             } else if (IS_LITERAL(*tok, "align") || IS_LITERAL(*tok, "aligned")) {
-                require_token(L, P, tok);
-
-                if (tok->type == TOK_CLOSE_PAREN) {
-                    /* TODO: atm we just leave this as it was, but is there a
-                     * better way of handling this?
-                     */
-                    put_back(P);
-                    ct->align_is_forced = 1;
-                    continue;
-                } else if (tok->type != TOK_OPEN_PAREN) {
-                    luaL_error(L, "unexpected token in align on line %d", P->line);
-                }
+                check_token(L, P, TOK_OPEN_PAREN, NULL, "expected align(#) on line %d", P->line);
 
                 require_token(L, P, tok);
                 if (tok->type != TOK_NUMBER) {
-                    return luaL_error(L, "unexpected token in align on line %d", P->line);
+                    luaL_error(L, "expected align(#) on line %d", P->line);
                 }
 
                 /* __attribute__(aligned(#)) is only supposed to increase alignment
                  */
 
-                if (IS_LITERAL(*tok, "align") || tok->integer > ct->align_mask) {
+                if (tok->integer > ct->align_mask + 1) {
                     switch (tok->integer) {
-                    /* TODO: atm we just leave this as it was, but is there a
-                     * better way of handling this
-                     */
-                    case 0: break;
                     case 1: ct->align_mask = 0; break;
                     case 2: ct->align_mask = 1; break;
                     case 4: ct->align_mask = 3; break;
@@ -1024,14 +1010,13 @@ static int parse_attribute(lua_State* L, struct parser* P, struct token* tok, st
                     default:
                         return luaL_error(L, "unsupported align size on line %d", P->line);
                     }
-                    ct->align_is_forced = 1;
                 }
 
                 check_token(L, P, TOK_CLOSE_PAREN, NULL, "expected align(#) on line %d", P->line);
 
             } else if (IS_LITERAL(*tok, "packed")) {
                 ct->align_mask = 0;
-                ct->align_is_forced = 1;
+                ct->is_packed = 1;
 
             } else if (IS_LITERAL(*tok, "cdecl")) {
                 ct->calling_convention = C_CALL;
@@ -1492,8 +1477,8 @@ void parse_argument(lua_State* L, struct parser* P, int ct_usr, struct ctype* ty
             type->const_mask <<= 1;
 
             /* __declspec(align(#)) may come before the type in a member */
-            if (!type->align_is_forced) {
-                type->align_mask = min(PTR_ALIGN_MASK, P->align_mask);
+            if (!type->is_packed) {
+                type->align_mask = max(min(PTR_ALIGN_MASK, P->align_mask), type->align_mask);
             }
 
         } else if (tok.type == TOK_REFERENCE) {
