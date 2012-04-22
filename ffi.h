@@ -398,7 +398,7 @@ int ffi_cdef(lua_State* L);
 
 void push_func_ref(lua_State* L, cfunction func);
 void free_code(struct jit* jit, lua_State* L, cfunction func);
-int x86_stack_required(lua_State* L, int usr);
+int x86_return_size(lua_State* L, int usr, const struct ctype* ct);
 void compile_function(lua_State* L, cfunction f, int ct_usr, const struct ctype* ct);
 cfunction compile_callback(lua_State* L, int fidx, int ct_usr, const struct ctype* ct);
 void compile_globals(struct jit* jit, lua_State* L);

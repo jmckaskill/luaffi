@@ -63,13 +63,7 @@ ADD(double, add_d)
 ADD(float, add_f)
 #ifdef HAVE_COMPLEX
 ADD(double complex, add_dc)
-//ADD(float complex, add_fc)
-EXPORT float complex add_fc(float complex a, float complex b);
-float complex add_fc(float complex a, float complex b)
-{
-    //fprintf(stderr, "%g+%gi %g+%gi\n", creal(a), cimag(a), creal(b), cimag(b));
-    return a + b;
-}
+ADD(float complex, add_fc)
 #endif
 
 EXPORT _Bool not_b(_Bool v);
