@@ -375,7 +375,7 @@ int x86_return_size(lua_State* L, int usr, const struct ctype* ct)
                 case UINTPTR_TYPE:
                     ret += sizeof(void*);
                     break;
-                case FUNCTION_TYPE:
+                case FUNCTION_PTR_TYPE:
                     ret += sizeof(cfunction);
                     break;
                 case BOOL_TYPE:
@@ -1113,7 +1113,7 @@ void compile_function(lua_State* L, cfunction func, int ct_usr, const struct cty
             add_pointer(Dst, ct, &reg);
         } else {
             switch (mbr_ct->type) {
-            case FUNCTION_TYPE:
+            case FUNCTION_PTR_TYPE:
                 lua_getuservalue(L, -1);
                 num_upvals += 2;
                 | call_rrrp extern check_typed_cfunction, L_ARG, i, lua_upvalueindex(num_upvals), mbr_ct
@@ -1452,7 +1452,7 @@ void compile_function(lua_State* L, cfunction func, int ct_usr, const struct cty
 
     } else {
         switch (mbr_ct->type) {
-        case FUNCTION_TYPE:
+        case FUNCTION_PTR_TYPE:
             lua_getuservalue(L, -1);
             num_upvals += 2;
             | mov [rsp+32], rax // save the function pointer

@@ -37,14 +37,14 @@ enum e8 {
     BAR8,
 };
 enum e16 {
-    FOO16,
+    FOO16 = 1 << 8,
     BAR16,
-    BIG16 = 2 << 14,
+    BIG16 = 1 << 14,
 };
 enum e32 {
-    FOO32,
+    FOO32 = 1 << 16,
     BAR32,
-    BIG32 = 2 << 30,
+    BIG32 = 1 << 30,
 };
 
 EXPORT bool have_complex();
@@ -58,16 +58,14 @@ bool have_complex()
 #endif
 }
 
-EXPORT bool is_msvc();
+EXPORT bool is_msvc;
 
-bool is_msvc()
-{
+bool is_msvc =
 #ifdef _MSC_VER
-    return 1;
+    1;
 #else
-    return 0;
+    0;
 #endif
-}
 
 EXPORT int test_pow(int v);
 int test_pow(int v)
@@ -594,6 +592,54 @@ EXPORT int call_fptr(struct fptr* s, int val);
 int call_fptr(struct fptr* s, int val) {
     return (s->p)(val);
 }
+
+EXPORT bool g_b;
+EXPORT int8_t g_i8;
+EXPORT int16_t g_i16;
+EXPORT int32_t g_i32;
+EXPORT int64_t g_i64;
+EXPORT uint8_t g_u8;
+EXPORT uint16_t g_u16;
+EXPORT uint32_t g_u32;
+EXPORT uint64_t g_u64;
+EXPORT float g_f;
+EXPORT double g_d;
+#ifdef HAVE_COMPLEX
+EXPORT double complex g_dc;
+EXPORT float complex g_fc;
+#endif
+EXPORT bool (*g_fp)();
+EXPORT const char g_s[];
+EXPORT const char* g_sp;
+EXPORT void* g_p;
+EXPORT enum e8 g_e8;
+EXPORT enum e16 g_e16;
+EXPORT enum e32 g_e32;
+EXPORT struct Date g_date;
+
+bool g_b = true;
+int8_t g_i8 = -8;
+int16_t g_i16 = -16;
+int32_t g_i32 = -32;
+int64_t g_i64 = -64;
+uint8_t g_u8 = 8;
+uint16_t g_u16 = 16;
+uint32_t g_u32 = 32;
+uint64_t g_u64 = 64;
+float g_f = 3;
+double g_d = 5;
+#ifdef HAVE_COMPLEX
+double complex g_dc = 7+8i;
+float complex g_fc = 6+9i;
+#endif
+bool (*g_fp)() = &have_complex;
+void* g_p = (void*) &have_complex;
+const char g_s[] = "g_s";
+const char* g_sp = "g_sp";
+enum e8 g_e8 = FOO8;
+enum e16 g_e16 = FOO16;
+enum e32 g_e32 = FOO32;
+struct Date g_date = {1,2,3,4};
 
 EXPORT void set_errno(int val);
 EXPORT int get_errno(void);

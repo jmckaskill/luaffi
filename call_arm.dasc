@@ -393,7 +393,7 @@ void push_function(struct jit* jit, lua_State* L, function_t func, int ct_usr, c
         lua_rawgeti(L, ct_usr, i);
         mt = (const struct ctype*) lua_touserdata(L, -1);
 
-        if (mt->pointers || mt->type == FUNCTION_TYPE || mt->type == ENUM_TYPE) {
+        if (mt->pointers || mt->type == FUNCTION_PTR_TYPE || mt->type == ENUM_TYPE) {
             lua_getuservalue(L, -1);
             num_upvals += 2;
 
@@ -407,7 +407,7 @@ void push_function(struct jit* jit, lua_State* L, function_t func, int ct_usr, c
 
             if (mt->pointers) {
                 | bl extern to_typed_pointer
-            } else if (mt->type == FUNCTION_TYPE) {
+            } else if (mt->type == FUNCTION_PTR_TYPE) {
                 | bl extern to_typed_function
             } else if (mt->type == ENUM_TYPE) {
                 | bl extern to_enum

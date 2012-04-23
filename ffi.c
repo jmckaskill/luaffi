@@ -412,6 +412,8 @@ static void* check_pointer(lua_State* L, int idx, struct ctype* ct)
             return lua_touserdata(L, idx);
         } else if (ct->pointers || ct->type == STRUCT_TYPE || ct->type == UNION_TYPE) {
             return p;
+        } else if (ct->type == FUNCTION_PTR_TYPE) {
+            return (void*) *(cfunction*) p;
         } else if (ct->type == UINTPTR_TYPE) {
             return *(void**) p;
         }
@@ -546,7 +548,7 @@ static cfunction check_cfunction(lua_State* L, int idx, int to_usr, const struct
             lua_pop(L, 1);
             return (cfunction) *(void**) p;
 
-        } else if (ft.type != FUNCTION_TYPE) {
+        } else if (ft.type != FUNCTION_PTR_TYPE) {
             goto err;
 
         } else if (!check_pointers) {
@@ -888,7 +890,7 @@ static void set_value(lua_State* L, int idx, void* to, int to_usr, const struct 
         case ENUM_TYPE:
             *(int32_t*) to = check_enum(L, idx, to_usr, tt);
             break;
-        case FUNCTION_TYPE:
+        case FUNCTION_PTR_TYPE:
             *(cfunction*) to = check_cfunction(L, idx, to_usr, tt, check_pointers);
             break;
         default:
@@ -956,7 +958,7 @@ static int do_new(lua_State* L, int is_cast)
 
     /* don't push a callback when we have a c function, as cb:set needs a
      * compiled callback from a lua function to work */
-    if (!ct.pointers && ct.type == FUNCTION_TYPE && (lua_isnil(L, 2) || lua_isfunction(L, 2))) {
+    if (!ct.pointers && ct.type == FUNCTION_PTR_TYPE && (lua_isnil(L, 2) || lua_isfunction(L, 2))) {
         /* Function cdatas are pinned and must be manually cleaned up by
          * calling func:free(). */
         compile_callback(L, 2, -1, &ct);
@@ -1175,7 +1177,7 @@ static int cdata_call(lua_State* L)
             return lua_gettop(L);
         }
     }
-    if (ct.pointers || ct.type != FUNCTION_TYPE) {
+    if (ct.pointers || ct.type != FUNCTION_PTR_TYPE) {
         return luaL_error(L, "only function callbacks are callable");
     }
 
@@ -1363,7 +1365,7 @@ static int cdata_index(lua_State* L)
 
     /* Callbacks use the same metatable as standard cdata values, but have set
      * and free members. So instead of mt.__index = mt, we do the equiv here. */
-    if (!ct.pointers && ct.type == FUNCTION_TYPE) {
+    if (!ct.pointers && ct.type == FUNCTION_PTR_TYPE) {
         lua_getmetatable(L, 1);
         lua_pushvalue(L, 2);
         lua_rawget(L, -2);
@@ -1417,7 +1419,7 @@ err:
         if (ct.type == UINT64_TYPE || ct.type == INT64_TYPE) {
             struct ctype rt;
             uint64_t val = *(uint64_t*) data;
-            val <<= ct.bit_offset;
+            val >>= ct.bit_offset;
             val &= (UINT64_C(1) << ct.bit_size) - 1;
 
             memset(&rt, 0, sizeof(rt));
@@ -1425,7 +1427,7 @@ err:
             rt.type = UINT64_TYPE;
             rt.is_defined = 1;
 
-            to = push_cdata(L, -1, &rt);
+            to = push_cdata(L, 0, &rt);
             *(uint64_t*) to = val;
 
             return 1;
@@ -1437,7 +1439,7 @@ err:
 
         } else {
             uint64_t val = *(uint64_t*) data;
-            val <<= ct.bit_offset;
+            val >>= ct.bit_offset;
             val &= (UINT64_C(1) << ct.bit_size) - 1;
             lua_pushnumber(L, val);
             return 1;
@@ -1466,7 +1468,7 @@ err:
         *(void**) to = data;
         return 1;
 
-    } else if (ct.type == FUNCTION_TYPE) {
+    } else if (ct.type == FUNCTION_PTR_TYPE) {
         cfunction* pf = (cfunction*) push_cdata(L, -1, &ct);
         *pf = *(cfunction*) data;
         return 1;
@@ -1547,7 +1549,7 @@ static int64_t check_intptr(lua_State* L, int idx, void* p, struct ctype* ct)
 
     } else if (ct->pointers) {
         return (intptr_t) p;
-    } else if (ct->type == UINTPTR_TYPE || ct->type == FUNCTION_TYPE) {
+    } else if (ct->type == UINTPTR_TYPE || ct->type == FUNCTION_PTR_TYPE) {
         return *(intptr_t*) p;
     } else if (ct->type == INT64_TYPE || ct->type == UINT64_TYPE) {
         return *(int64_t*) p;
@@ -1992,10 +1994,10 @@ static int cdata_pow(lua_State* L)
                 goto err;                                                   \
             }                                                               \
                                                                             \
-        } else if (lt.is_null && rt.type == FUNCTION_TYPE) {                \
+        } else if (lt.is_null && rt.type == FUNCTION_PTR_TYPE) {                \
             res = OP((uint64_t) left, (uint64_t) right);                    \
                                                                             \
-        } else if (rt.is_null && lt.type == FUNCTION_TYPE) {                \
+        } else if (rt.is_null && lt.type == FUNCTION_PTR_TYPE) {                \
             res = OP((uint64_t) left, (uint64_t) right);                    \
                                                                             \
         } else if (lt.pointers && rt.type == UINTPTR_TYPE) {                \
@@ -2088,7 +2090,7 @@ static const char* etype_tostring(int type)
     case ENUM_TYPE: return "enum";
     case UNION_TYPE: return "union";
     case STRUCT_TYPE: return "struct";
-    case FUNCTION_TYPE: return "func";
+    case FUNCTION_PTR_TYPE: return "func";
     default: return "invalid";
     }
 }
@@ -2345,46 +2347,84 @@ static int ffi_load(lua_State* L)
     return 1;
 }
 
-static int find_function(lua_State* L, int module, const char* asmname, int usr, const struct ctype* ct)
+static void* find_symbol(lua_State* L, int modidx, const char* asmname)
 {
     size_t i;
-    void** libs = (void**) lua_touserdata(L, module);
-    size_t num = lua_rawlen(L, module) / sizeof(void*);
+    void** libs;
+    size_t num;
+    void* sym = NULL;
 
-    usr = lua_absindex(L, usr);
+    libs = (void**) lua_touserdata(L, modidx);
+    num = lua_rawlen(L, modidx) / sizeof(void*);
 
-    for (i = 0; i < num; i++) {
+    for (i = 0; i < num && sym == NULL; i++) {
         if (libs[i]) {
-            cfunction func = (cfunction) GetProcAddressA(libs[i], asmname);
-
-            if (func) {
-                compile_function(L, func, usr, ct);
-                return 1;
-            }
+            sym = GetProcAddressA(libs[i], asmname);
         }
     }
 
-    return 0;
+    return sym;
+}
+
+/* pushes the user table */
+static void* lookup_global(lua_State* L, int modidx, int nameidx, const char** pname, struct ctype* ct)
+{
+    int top = lua_gettop(L);
+    void* sym;
+
+    modidx = lua_absindex(L, modidx);
+    nameidx = lua_absindex(L, nameidx);
+
+    *pname = luaL_checkstring(L, nameidx);
+
+    /* get the ctype */
+    push_upval(L, &functions_key);
+    lua_pushvalue(L, nameidx);
+    lua_rawget(L, -2);
+    if (lua_isnil(L, -1)) {
+        luaL_error(L, "missing declaration for function/global %s", *pname);
+        return NULL;
+    }
+
+    /* leave just the ct_usr on the stack */
+    *ct = *(const struct ctype*) lua_touserdata(L, -1);
+    lua_getuservalue(L, -1);
+    lua_replace(L, top + 1);
+    lua_pop(L, 1);
+
+    assert(lua_gettop(L) == top + 1);
+
+    /* get the assembly name */
+    push_upval(L, &asmname_key);
+    lua_pushvalue(L, nameidx);
+    lua_rawget(L, -2);
+    if (lua_isstring(L, -1)) {
+        *pname = lua_tostring(L, -1);
+    }
+    lua_pop(L, 2);
+
+    sym = find_symbol(L, modidx, *pname);
+
+    assert(lua_gettop(L) == top + 1);
+    return sym;
 }
 
 static int cmodule_index(lua_State* L)
 {
-    const char* funcname;
+    const char* asmname;
     struct ctype ct;
-    int ct_usr;
-    int mod_usr;
+    void *sym;
 
     lua_settop(L, 2);
-    lua_getuservalue(L, 1);
-    mod_usr = lua_gettop(L);
-    lua_pushvalue(L, 2);
-    lua_rawget(L, -2);
 
     /* see if we have already loaded the function */
+    lua_getuservalue(L, 1);
+    lua_pushvalue(L, 2);
+    lua_rawget(L, -2);
     if (!lua_isnil(L, -1)) {
         return 1;
     }
-    lua_pop(L, 1);
+    lua_pop(L, 2);
 
     /* check the constants table */
     push_upval(L, &constants_key);
@@ -2395,53 +2435,147 @@ static int cmodule_index(lua_State* L)
     }
     lua_pop(L, 2);
 
-    funcname = luaL_checkstring(L, 2);
-
-    /* find the function type */
-    push_upval(L, &functions_key);
-    lua_pushvalue(L, 2);
-    lua_rawget(L, -2);
-    lua_remove(L, -2); /* function tbl */
-    if (lua_isnil(L, -1)) {
-        luaL_error(L, "missing declaration for function %s", funcname);
-    }
-    ct = *(const struct ctype*) lua_touserdata(L, -1);
-    lua_getuservalue(L, -1);
-    ct_usr = lua_gettop(L);
-
-    /* replace funcname with the assembly name if its different */
-    lua_pushlightuserdata(L, &asmname_key);
-    lua_rawget(L, ct_usr);
-    if (!lua_isnil(L, -1)) {
-        funcname = lua_tostring(L, -1);
-    }
-
-    if (find_function(L, 1, funcname, ct_usr, &ct)) {
-        goto end;
-    }
+    /* lookup_global pushes the ct_usr */
+    sym = lookup_global(L, 1, 2, &asmname, &ct);
 
 #if defined _WIN32 && !defined _WIN64 && (defined __i386__ || defined _M_IX86)
-    ct.calling_convention = STD_CALL;
-    lua_pushfstring(L, "_%s@%d", funcname, x86_return_size(L, ct_usr, &ct));
-    if (find_function(L, 1, lua_tostring(L, -1), ct_usr, &ct)) {
-        goto end;
+    if (!sym && ct.type == FUNCTION_TYPE) {
+        ct.calling_convention = STD_CALL;
+        lua_pushfstring(L, "_%s@%d", asmname, x86_return_size(L, -1, &ct));
+        sym = find_symbol(L, 1, lua_tostring(L, -1));
+        lua_pop(L, 1);
     }
 
-    ct.calling_convention = FAST_CALL;
-    lua_pushfstring(L, "@%s@%d", funcname, x86_return_size(L, ct_usr, &ct));
-    if (find_function(L, 1, lua_tostring(L, -1), ct_usr, &ct)) {
-        goto end;
+    if (!sym && ct.type == FUNCTION_TYPE) {
+        ct.calling_convention = FAST_CALL;
+        lua_pushfstring(L, "@%s@%d", asmname, x86_return_size(L, -1, &ct));
+        sym = find_symbol(L, 1, lua_tostring(L, -1));
+        lua_pop(L, 1);
     }
 #endif
 
-    return luaL_error(L, "failed to find function %s", funcname);
+    if (!sym) {
+        return luaL_error(L, "failed to find function/global %s", asmname);
+    }
 
-end:
-    /* set module usr value[luaname] = function to cache for next time */
-    lua_pushvalue(L, 2);
-    lua_pushvalue(L, -2);
-    lua_rawset(L, mod_usr);
-    return 1;
+    assert(lua_gettop(L) == 3); /* module, name, ct_usr */
+
+    if (ct.type == FUNCTION_TYPE) {
+        compile_function(L, (cfunction) sym, -1, &ct);
+        assert(lua_gettop(L) == 4); /* module, name, ct_usr, function */
+
+        /* set module usr value[luaname] = function to cache for next time */
+        lua_getuservalue(L, 1);
+        lua_pushvalue(L, 2);
+        lua_pushvalue(L, -3);
+        lua_rawset(L, -3);
+        lua_pop(L, 1); /* module uv */
+        return 1;
+    }
+
+    /* extern const char* foo; and extern const char foo[]; */
+    if (ct.pointers == 1 && ct.type == CHAR_TYPE) {
+        char* str = (char*) sym;
+        if (!ct.is_array) {
+            str = *(char**) sym;
+        }
+        lua_pushstring(L, str);
+        return 1;
+    }
+
+    /* extern struct foo foo[], extern void* foo[]; and extern struct foo foo; */
+    if (ct.is_array || (!ct.pointers && (ct.type == UNION_TYPE || ct.type == STRUCT_TYPE))) {
+        void* p;
+        ct.is_reference = 1;
+        p = push_cdata(L, -1, &ct);
+        *(void**) p = sym;
+        return 1;
+    }
+
+    /* extern void* foo; and extern void (*foo)(); */
+    if (ct.pointers || ct.type == FUNCTION_PTR_TYPE) {
+        void* p = push_cdata(L, -1, &ct);
+        *(void**) p = *(void**) sym;
+        return 1;
+    }
+
+    switch (ct.type) {
+    case COMPLEX_DOUBLE_TYPE:
+    case COMPLEX_FLOAT_TYPE:
+    case UINT64_TYPE:
+    case UINTPTR_TYPE:
+    case INT64_TYPE:
+        {
+            /* TODO: complex float/double need to be references if .re and
+             * .imag are setable */
+            void* p = push_cdata(L, -1, &ct);
+            memcpy(p, sym, ct.base_size);
+            return 1;
+        }
+
+    case DOUBLE_TYPE:
+        lua_pushnumber(L, *(double*) sym);
+        return 1;
+
+    case FLOAT_TYPE:
+        lua_pushnumber(L, *(float*) sym);
+        return 1;
+
+    case BOOL_TYPE:
+        lua_pushboolean(L, *(bool*) sym);
+        return 1;
+
+    case INT8_TYPE:
+        lua_pushnumber(L, *(int8_t*) sym);
+        return 1;
+
+    case INT16_TYPE:
+        lua_pushnumber(L, *(int16_t*) sym);
+        return 1;
+
+    case INT32_TYPE:
+    case ENUM_TYPE:
+        lua_pushnumber(L, *(int32_t*) sym);
+        return 1;
+
+    case UINT8_TYPE:
+        lua_pushnumber(L, *(uint8_t*) sym);
+        return 1;
+
+    case UINT16_TYPE:
+        lua_pushnumber(L, *(uint16_t*) sym);
+        return 1;
+
+    case UINT32_TYPE:
+        lua_pushnumber(L, *(uint32_t*) sym);
+        return 1;
+    }
+
+    return luaL_error(L, "NYI - global value type");
+}
+
+static int cmodule_newindex(lua_State* L)
+{
+    const char* name;
+    void* sym;
+    struct ctype ct;
+
+    lua_settop(L, 3);
+
+    /* pushes the ct_usr */
+    sym = lookup_global(L, 1, 2, &name, &ct);
+    assert(lua_gettop(L) == 4); /* module, name, value, ct_usr */
+
+    if (sym == NULL) {
+        return luaL_error(L, "failed to find global %s", name);
+    }
+
+    if (ct.type == FUNCTION_TYPE || ct.is_array || (ct.const_mask & 1)) {
+        return luaL_error(L, "can not set global %s", name);
+    }
+
+    set_value(L, 3, sym, -1, &ct, 1);
+    return 0;
 }
 
 static int jit_gc(lua_State* L)
@@ -2557,6 +2691,7 @@ static const luaL_Reg ctype_mt[] = {
 
 static const luaL_Reg cmodule_mt[] = {
     {"__index", &cmodule_index},
+    {"__newindex", &cmodule_newindex},
     {NULL, NULL}
 };
 
@@ -2926,6 +3061,9 @@ int luaopen_ffi(lua_State* L)
 
     lua_newtable(L);
     set_upval(L, &functions_key);
+
+    lua_newtable(L);
+    set_upval(L, &asmname_key);
 
     lua_newtable(L);
     set_upval(L, &abi_key);

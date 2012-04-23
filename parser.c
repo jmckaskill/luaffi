@@ -973,10 +973,20 @@ static int parse_type_name(lua_State* L, struct parser* P)
  * more following it) or 0 if not. If the token was used, the next token must
  * be retrieved using next_token/require_token.
  */
-static int parse_attribute(lua_State* L, struct parser* P, struct token* tok, struct ctype* ct)
+static int parse_attribute(lua_State* L, struct parser* P, struct token* tok, struct ctype* ct, struct token* asmname)
 {
     if (tok->type != TOK_TOKEN) {
         return 0;
+
+    } else if (asmname && IS_LITERAL(*tok, "__asm")) {
+        check_token(L, P, TOK_OPEN_PAREN, NULL, "unexpected token after __asm on line %d", P->line);
+        require_token(L, P, tok);
+        if (tok->type != TOK_STRING) {
+            luaL_error(L, "unexpected token after __asm on line %d", P->line);
+        }
+        *asmname = *tok;
+        check_token(L, P, TOK_CLOSE_PAREN, NULL, "unexpected token after __asm on line %d", P->line);
+        return 1;
 
     } else if (IS_LITERAL(*tok, "__attribute__") || IS_LITERAL(*tok, "__declspec")) {
         int parens = 1;
@@ -1068,7 +1078,7 @@ int parse_type(lua_State* L, struct parser* P, struct ctype* ct)
     require_token(L, P, &tok);
 
     /* get function attributes before the return type */
-    while (parse_attribute(L, P, &tok, ct)) {
+    while (parse_attribute(L, P, &tok, ct, NULL)) {
         require_token(L, P, &tok);
     }
 
@@ -1152,7 +1162,7 @@ static void append_type_name(luaL_Buffer* B, int usr, const struct ctype* ct)
 
     usr = lua_absindex(L, usr);
 
-    if (ct->type != FUNCTION_TYPE && (ct->const_mask & (1 << ct->pointers))) {
+    if (ct->type != FUNCTION_PTR_TYPE && (ct->const_mask & (1 << ct->pointers))) {
         luaL_addstring(B, "const ");
     }
 
@@ -1169,7 +1179,7 @@ static void append_type_name(luaL_Buffer* B, int usr, const struct ctype* ct)
         luaL_addstring(B, "union ");
         goto get_name;
 
-    case FUNCTION_TYPE:
+    case FUNCTION_PTR_TYPE:
     get_name:
         lua_pushlightuserdata(L, &g_name_key);
         lua_rawget(L, usr);
@@ -1233,7 +1243,7 @@ static void append_type_name(luaL_Buffer* B, int usr, const struct ctype* ct)
         luaL_error(L, "internal error - bad type %d", ct->type);
     }
 
-    if (ct->type == FUNCTION_TYPE && (ct->const_mask & (1 << ct->pointers))) {
+    if (ct->type == FUNCTION_PTR_TYPE && (ct->const_mask & (1 << ct->pointers))) {
         luaL_addstring(B, " const");
     }
 
@@ -1489,7 +1499,7 @@ void parse_argument(lua_State* L, struct parser* P, int ct_usr, struct ctype* ty
         } else if (tok.type == TOK_REFERENCE) {
             luaL_error(L, "NYI: c++ reference types");
 
-        } else if (parse_attribute(L, P, &tok, type)) {
+        } else if (parse_attribute(L, P, &tok, type, asmname)) {
             /* parse attribute has filled out appropriate fields in type */
 
         } else if (tok.type == TOK_OPEN_PAREN) {
@@ -1523,7 +1533,7 @@ void parse_argument(lua_State* L, struct parser* P, int ct_usr, struct ctype* ty
                         type->pointers++;
                         type->const_mask <<= 1;
 
-                    } else if (parse_attribute(L, P, &tok, type)) {
+                    } else if (parse_attribute(L, P, &tok, type, NULL)) {
                         /* parse_attribute sets the appropriate fields */
 
                     } else if (tok.type != TOK_TOKEN) {
@@ -1549,6 +1559,8 @@ void parse_argument(lua_State* L, struct parser* P, int ct_usr, struct ctype* ty
 
                 if (type->pointers > 0) {
                     type->pointers--;
+                    type->const_mask >>= 1;
+                    type->type = FUNCTION_PTR_TYPE;
                 }
 
                 check_token(L, P, TOK_OPEN_PAREN, "", "unexpected token in function on line %d", P->line);
@@ -1562,18 +1574,7 @@ void parse_argument(lua_State* L, struct parser* P, int ct_usr, struct ctype* ty
                     break;
                 }
 
-                if (tok.type == TOK_TOKEN && IS_LITERAL(tok, "__asm")) {
-                    check_token(L, P, TOK_OPEN_PAREN, NULL, "unexpected token after __asm on line %d", P->line);
-                    require_token(L, P, &tok);
-                    if (tok.type != TOK_STRING) {
-                        luaL_error(L, "unexpected token after __asm on line %d", P->line);
-                    }
-                    if (asmname) {
-                        *asmname = tok;
-                    }
-                    check_token(L, P, TOK_CLOSE_PAREN, NULL, "unexpected token after __asm on line %d", P->line);
-
-                } else if (!parse_attribute(L, P, &tok, type)) {
+                if (!parse_attribute(L, P, &tok, type, asmname)) {
                     put_back(P);
                     break;
                 }
@@ -1634,19 +1635,6 @@ void parse_argument(lua_State* L, struct parser* P, int ct_usr, struct ctype* ty
             put_back(P);
             break;
 
-        } else if (IS_LITERAL(tok, "__cdecl")) {
-            type->calling_convention = C_CALL;
-
-        } else if (IS_LITERAL(tok, "__stdcall")) {
-#if defined __i386__ || defined _M_IX86
-            type->calling_convention = STD_CALL;
-#endif
-
-        } else if (IS_LITERAL(tok, "__fastcall")) {
-#if defined __i386__ || defined _M_IX86
-            type->calling_convention = FAST_CALL;
-#endif
-
         } else if (IS_LITERAL(tok, "const")) {
             type->const_mask |= 1;
 
@@ -1662,7 +1650,7 @@ void parse_argument(lua_State* L, struct parser* P, int ct_usr, struct ctype* ty
         }
     }
 
-    if (type->type != FUNCTION_TYPE && type->calling_convention != C_CALL) {
+    if (type->type != FUNCTION_PTR_TYPE && type->calling_convention != C_CALL) {
         /* functions use ftype and have already returned */
         luaL_error(L, "calling convention annotation only allowed on functions and function pointers on line %d", P->line);
     }
@@ -1819,30 +1807,27 @@ static int parse_root(lua_State* L, struct parser* P)
             parse_type(L, P, &type);
             parse_argument(L, P, -1, &type, &name, &asmname);
 
-            if (type.pointers || (type.type != ENUM_TYPE && type.type != UNION_TYPE && type.type != STRUCT_TYPE && type.type != FUNCTION_TYPE)) {
-                return luaL_error(L, "unexpected type in root on line %d", P->line);
-            }
+            check_token(L, P, TOK_SEMICOLON, NULL, "missing semicolon on line %d", P->line);
 
-            require_token(L, P, &tok);
+            if (name.size) {
+                /* global/function declaration */
 
-            if (tok.type != TOK_SEMICOLON) {
-                return luaL_error(L, "missing semicolon on line %d", P->line);
-            }
+                /* set asmname_tbl[name] = asmname */
+                if (asmname.size) {
+                    push_upval(L, &asmname_key);
+                    lua_pushlstring(L, name.str, name.size);
+                    lua_pushlstring(L, asmname.str, asmname.size);
+                    lua_rawset(L, -3);
+                    lua_pop(L, 1); /* asmname upval */
+                }
 
-            /* this was either a function or type declaration/definition - if
-             * the latter then the type has already been processed */
-            if (type.type == FUNCTION_TYPE && asmname.size) {
-                lua_pushlightuserdata(L, &asmname_key);
-                lua_pushlstring(L, asmname.str, asmname.size);
-                lua_rawset(L, -3);
-            }
-
-            if (type.type == FUNCTION_TYPE && name.size) {
                 push_upval(L, &functions_key);
                 lua_pushlstring(L, name.str, name.size);
                 push_ctype(L, -3, &type);
                 lua_rawset(L, -3);
                 lua_pop(L, 1); /* functions upval */
+            } else {
+                /* type declaration/definition - already been processed */
             }
 
             lua_pop(L, 2);

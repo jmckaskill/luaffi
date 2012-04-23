@@ -286,6 +286,7 @@ enum {
     UNION_TYPE,
     STRUCT_TYPE,
     FUNCTION_TYPE,
+    FUNCTION_PTR_TYPE,
 };
 
 #define CHAR_TYPE ((((char) -1) > 0) ? UINT8_TYPE : INT8_TYPE)

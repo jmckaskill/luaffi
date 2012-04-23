@@ -25,17 +25,18 @@ enum e8 {
     BAR8,
 };
 enum e16 {
-    FOO16,
+    FOO16 = 1 << 8,
     BAR16,
-    BIG16 = 2 << 14,
+    BIG16 = 1 << 14,
 };
 enum e32 {
-    FOO32,
+    FOO32 = 1 << 16,
     BAR32,
-    BIG32 = 2 << 30,
+    BIG32 = 1 << 30,
 };
 int max_alignment();
-bool is_msvc();
+bool is_msvc;
+bool is_msvc2 __asm("is_msvc");
 bool have_complex();
 bool have_complex2() __asm("have_complex");
 
@@ -185,6 +186,28 @@ struct fptr {
 };
 int call_fptr(struct fptr* s, int val);
 
+bool g_b;
+int8_t g_i8;
+int16_t g_i16;
+int32_t g_i32;
+int64_t g_i64;
+uint8_t g_u8;
+uint16_t g_u16;
+uint32_t g_u32;
+uint64_t g_u64;
+float g_f;
+double g_d;
+double complex g_dc;
+float complex g_fc;
+bool (*g_fp)();
+const char g_s[];
+const char* g_sp;
+void* g_p;
+enum e8 g_e8;
+enum e16 g_e16;
+enum e32 g_e32;
+struct Date g_date;
+
 void set_errno(int val);
 int get_errno(void);
 ]]
@@ -290,6 +313,9 @@ local function checkalign(type, v, ret)
     check(ret, #str)
 end
 
+local u64 = ffi.typeof('uint64_t')
+local i64 = ffi.typeof('int64_t')
+
 local first = true
 
 for convention,c in pairs(dlls) do
@@ -320,8 +346,56 @@ for convention,c in pairs(dlls) do
     end
 
     check(c.have_complex(), c.have_complex2())
+    check(c.is_msvc, c.is_msvc2)
 
-    local align_attr = c.is_msvc() and [[
+    check(c.g_b, true)
+    check(c.g_i8, -8)
+    check(c.g_i16, -16)
+    check(c.g_i32, -32)
+    check(c.g_i64, i64(-64))
+    check(c.g_u8, 8)
+    check(c.g_u16, 16)
+    check(c.g_u32, 32)
+    check(c.g_u64, u64(64))
+    check(c.g_f, 3)
+    check(c.g_d, 5)
+    if c.have_complex() then
+        check(c.g_dc, 7 + 8*i)
+        check(c.g_fc, 6 + 9*i)
+    end
+    check(ffi.cast('void*', c.g_fp), c.g_p)
+    check(c.g_s, 'g_s')
+    check(c.g_sp, 'g_sp')
+    check(c.g_e8, c.FOO8)
+    check(c.g_e16, c.FOO16)
+    check(c.g_e32, c.FOO32)
+    check(c.g_date.nWeekDay, 1)
+    check(c.g_date.nMonthDay, 2)
+    check(c.g_date.nMonth, 3)
+    check(c.g_date.nYear, 4)
+
+    c.g_b = false; check(c.g_b, false)
+    c.g_i8 = -108; check(c.g_i8, -108)
+    c.g_i16 = -1016; check(c.g_i16, -1016)
+    c.g_i32 = -1032; check(c.g_i32, -1032)
+    c.g_i64 = -1064; check(c.g_i64, i64(-1064))
+    c.g_u8 = 208; check(c.g_u8, 208)
+    c.g_u16 = 2016; check(c.g_u16, 2016)
+    c.g_u32 = 2032; check(c.g_u32, 2032)
+    c.g_u64 = 2064; check(c.g_u64, u64(2064))
+    c.g_f = 13; check(c.g_f, 13)
+    c.g_d = 15; check(c.g_d, 15)
+    if c.have_complex() then
+        c.g_dc = 17+18*i; check(c.g_dc, 17+18*i)
+        c.g_fc = 16+19*i; check(c.g_fc, 16+19*i)
+    end
+    c.g_sp = 'foo'; check(c.g_sp, 'foo')
+    c.g_e8 = c.BAR8; check(c.g_e8, c.BAR8)
+    c.g_e16 = c.BAR16; check(c.g_e16, c.BAR16)
+    c.g_e32 = c.BAR32; check(c.g_e32, c.BAR32)
+    c.g_date.nWeekDay = 3; check(c.g_date.nWeekDay, 3)
+
+    local align_attr = c.is_msvc and [[
         struct align_attr_ALIGN_SUFFIX {
             char pad;
             __declspec(align(ALIGN)) TYPE v;
@@ -363,7 +437,7 @@ for convention,c in pairs(dlls) do
             checkalign(type, v, c['print_align_' .. align .. '_' .. suffix](buf, v))
 
             -- MSVC doesn't support aligned attributes on enums
-            if not type:match('^enum e[0-9]*$') or not c.is_msvc() then
+            if not type:match('^enum e[0-9]*$') or not c.is_msvc then
                 local v2 = ffi.new('struct align_attr_' .. align .. '_' .. suffix, {0, test})
                 checkalign(type, v2, c['print_align_attr_' .. align .. '_' .. suffix](buf, v2))
             end
@@ -551,8 +625,6 @@ vls.d.a = 4
 local suc, err = pcall(function() vls.key = 'val' end)
 assert(not suc)
 check(err, 'in newindex key 4 val')
-
-local u64 = ffi.typeof('uint64_t')
 
 mt.__add = function(vls, a) return vls.d.a + a end
 mt.__sub = function(vls, a) return vls.d.a - a end
