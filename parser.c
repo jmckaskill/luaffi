@@ -1702,6 +1702,88 @@ static void parse_typedef(lua_State* L, struct parser* P)
     assert(lua_gettop(L) == top);
 }
 
+static bool is_hex(char ch)
+{ return ('0' <= ch && ch <= '9') || ('a' <= ch && ch <= 'f') || ('A' <= ch && ch <= 'F'); }
+
+static bool is_digit(char ch)
+{ return '0' <= ch && ch <= '9'; }
+
+static int from_hex(char ch)
+{
+    if (ch >= 'a') {
+        return ch - 'a' + 10;
+    } else if (ch >= 'A') {
+        return ch - 'A' + 10;
+    } else {
+        return ch - '0';
+    }
+}
+
+static void push_string_token(lua_State* L, struct token* tok)
+{
+    const char* p = tok->str;
+    const char* e = p + tok->size;
+    luaL_Buffer B;
+
+    char* t = luaL_buffinitsize(L, &B, tok->size);
+    char* s = t;
+
+    assert(tok->type == TOK_STRING);
+
+    while (p < e) {
+        if (*p == '\\') {
+            if (++p == e) {
+                luaL_error(L, "parse error in string");
+            }
+            switch (*p) {
+            case '\\': *(t++) = '\\'; p++; break;
+            case '\"': *(t++) = '\"'; p++; break;
+            case '\'': *(t++) = '\''; p++; break;
+            case 'n': *(t++) = '\n'; p++; break;
+            case 'r': *(t++) = '\r'; p++; break;
+            case 'b': *(t++) = '\b'; p++; break;
+            case 't': *(t++) = '\t'; p++; break;
+            case 'f': *(t++) = '\f'; p++; break;
+            case 'a': *(t++) = '\a'; p++; break;
+            case 'v': *(t++) = '\v'; p++; break;
+            case 'e': *(t++) = 0x1B; p++; break;
+            case 'x':
+                {
+                    uint8_t u;
+                    p++;
+                    if (p + 2 > e || !is_hex(p[0]) || !is_hex(p[1])) {
+                        luaL_error(L, "parse error in string");
+                    }
+                    u = (from_hex(p[0]) << 4) | from_hex(p[1]);
+                    *(t++) = *(char*) &u;
+                    p += 2;
+                    break;
+                }
+            default:
+                {
+                    uint8_t u;
+                    const char* e2 = min(p + 3, e);
+                    if (!is_digit(*p)) {
+                        luaL_error(L, "parse error in string");
+                    }
+                    u = *p - '0';
+                    p++;
+                    while (is_digit(*p) && p < e2) {
+                        u = 10*u + *p-'0';
+                        p++;
+                    }
+                    *(t++) = *(char*) &u;
+                    break;
+                }
+            }
+        } else {
+            *(t++) = *(p++);
+        }
+    }
+
+    luaL_pushresultsize(&B, t-s);
+}
+
 #define END 0
 #define PRAGMA_POP 1
 
@@ -1816,7 +1898,7 @@ static int parse_root(lua_State* L, struct parser* P)
                 if (asmname.size) {
                     push_upval(L, &asmname_key);
                     lua_pushlstring(L, name.str, name.size);
-                    lua_pushlstring(L, asmname.str, asmname.size);
+                    push_string_token(L, &asmname);
                     lua_rawset(L, -3);
                     lua_pop(L, 1); /* asmname upval */
                 }
