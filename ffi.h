@@ -61,6 +61,7 @@ extern "C" {
 #if __STDC_VERSION__+0 >= 199901L
 #include <complex.h>
 #define HAVE_COMPLEX
+#define HAVE_LONG_DOUBLE
 #endif
 
 #ifndef NDEBUG
@@ -274,10 +275,12 @@ enum {
 enum {
     INVALID_TYPE,
     VOID_TYPE,
-    DOUBLE_TYPE,
     FLOAT_TYPE,
-    COMPLEX_DOUBLE_TYPE,
+    DOUBLE_TYPE,
+    LONG_DOUBLE_TYPE,
     COMPLEX_FLOAT_TYPE,
+    COMPLEX_DOUBLE_TYPE,
+    COMPLEX_LONG_DOUBLE_TYPE,
     BOOL_TYPE,
     INT8_TYPE,
     INT16_TYPE,

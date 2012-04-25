@@ -924,7 +924,7 @@ static int parse_type_name(lua_State* L, struct parser* P)
 
     } else if (flags & COMPLEX) {
         if (flags & LONG) {
-            luaL_error(L, "NYI: long complex double");
+            lua_pushliteral(L, "complex long double");
         } else if (flags & FLOAT) {
             lua_pushliteral(L, "complex float");
         } else {
@@ -933,7 +933,7 @@ static int parse_type_name(lua_State* L, struct parser* P)
 
     } else if (flags & DOUBLE) {
         if (flags & LONG) {
-            luaL_error(L, "NYI: long double");
+            lua_pushliteral(L, "long double");
         } else {
             lua_pushliteral(L, "double");
         }
@@ -1308,14 +1308,20 @@ static void append_type_name(luaL_Buffer* B, int usr, const struct ctype* ct)
     case DOUBLE_TYPE:
         luaL_addstring(B, "double");
         break;
+    case LONG_DOUBLE_TYPE:
+        luaL_addstring(B, "long double");
+        break;
     case FLOAT_TYPE:
         luaL_addstring(B, "float");
         break;
+    case COMPLEX_LONG_DOUBLE_TYPE:
+        luaL_addstring(B, "long complex double");
+        break;
     case COMPLEX_DOUBLE_TYPE:
-        luaL_addstring(B, "double complex");
+        luaL_addstring(B, "complex double");
         break;
     case COMPLEX_FLOAT_TYPE:
-        luaL_addstring(B, "float complex");
+        luaL_addstring(B, "complex float");
         break;
     case INT8_TYPE:
         luaL_addstring(B, "char");

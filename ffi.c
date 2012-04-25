@@ -2845,10 +2845,16 @@ static int setup_upvals(lua_State* L)
         struct {char ch; uint64_t v;} a64;
         struct {char ch; float v;} af;
         struct {char ch; double v;} ad;
+#ifdef HAVE_LONG_DOUBLE
+        struct {char ch; long double v;} ald;
+#endif
         struct {char ch; uintptr_t v;} aptr;
         struct ctype ct;
         struct {char ch; complex_float v;} cf;
         struct {char ch; complex_double v;} cd;
+#if defined HAVE_LONG_DOUBLE && defined HAVE_COMPLEX
+        struct {char ch; complex long double v;} cld;
+#endif
 
         push_builtin(L, &ct, "void", VOID_TYPE, 0, 0);
         push_builtin(L, &ct, "bool", BOOL_TYPE, sizeof(_Bool), sizeof(_Bool) -1);
@@ -2862,9 +2868,15 @@ static int setup_upvals(lua_State* L)
         push_builtin(L, &ct, "int64_t", INT64_TYPE, sizeof(int64_t), ALIGNOF(a64));
         push_builtin(L, &ct, "float", FLOAT_TYPE, sizeof(float), ALIGNOF(af));
         push_builtin(L, &ct, "double", DOUBLE_TYPE, sizeof(double), ALIGNOF(ad));
+#ifdef HAVE_LONG_DOUBLE
+        push_builtin(L, &ct, "long double", LONG_DOUBLE_TYPE, sizeof(long double), ALIGNOF(ald));
+#endif
         push_builtin(L, &ct, "uintptr_t", UINTPTR_TYPE, sizeof(uintptr_t), ALIGNOF(aptr));
         push_builtin(L, &ct, "complex float", COMPLEX_FLOAT_TYPE, sizeof(complex_float), ALIGNOF(cf));
         push_builtin(L, &ct, "complex double", COMPLEX_DOUBLE_TYPE, sizeof(complex_double), ALIGNOF(cd));
+#if defined HAVE_LONG_DOUBLE && defined HAVE_COMPLEX
+        push_builtin(L, &ct, "complex long double", COMPLEX_LONG_DOUBLE_TYPE, sizeof(complex long double), ALIGNOF(cld));
+#endif
 
         /* add NULL and i constants */
         push_upval(L, &constants_key);
