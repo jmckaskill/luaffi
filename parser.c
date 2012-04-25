@@ -889,6 +889,8 @@ static int parse_type_name(lua_State* L, struct parser* P)
             flags |= FLOAT;
         } else if (IS_LITERAL(tok, "complex") || IS_LITERAL(tok, "_Complex")) {
             flags |= COMPLEX;
+        } else if (IS_LITERAL(tok, "register")) {
+            /* ignore */
         } else {
             break;
         }
