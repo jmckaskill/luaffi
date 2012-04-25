@@ -2026,32 +2026,43 @@ static int parse_root(lua_State* L, struct parser* P)
 
             put_back(P);
             parse_type(L, P, &type);
-            parse_argument(L, P, -1, &type, &name, &asmname);
 
-            check_token(L, P, TOK_SEMICOLON, NULL, "missing semicolon on line %d", P->line);
+            for (;;) {
+                parse_argument(L, P, -1, &type, &name, &asmname);
 
-            if (name.size) {
-                /* global/function declaration */
+                if (name.size) {
+                    /* global/function declaration */
 
-                /* set asmname_tbl[name] = asmname */
-                if (asmname.next) {
-                    push_upval(L, &asmname_key);
+                    /* set asmname_tbl[name] = asmname */
+                    if (asmname.next) {
+                        push_upval(L, &asmname_key);
+                        lua_pushlstring(L, name.str, name.size);
+                        push_strings(L, &asmname);
+                        lua_rawset(L, -3);
+                        lua_pop(L, 1); /* asmname upval */
+                    }
+
+                    push_upval(L, &functions_key);
                     lua_pushlstring(L, name.str, name.size);
-                    push_strings(L, &asmname);
+                    push_ctype(L, -3, &type);
                     lua_rawset(L, -3);
-                    lua_pop(L, 1); /* asmname upval */
+                    lua_pop(L, 1); /* functions upval */
+                } else {
+                    /* type declaration/definition - already been processed */
                 }
 
-                push_upval(L, &functions_key);
-                lua_pushlstring(L, name.str, name.size);
-                push_ctype(L, -3, &type);
-                lua_rawset(L, -3);
-                lua_pop(L, 1); /* functions upval */
-            } else {
-                /* type declaration/definition - already been processed */
+                lua_pop(L, 1);
+
+                require_token(L, P, &tok);
+
+                if (tok.type == TOK_SEMICOLON) {
+                    break;
+                } else if (tok.type != TOK_COMMA) {
+                    luaL_error(L, "missing semicolon on line %d", P->line);
+                }
             }
 
-            lua_pop(L, 2);
+            lua_pop(L, 1);
         }
     }
 
