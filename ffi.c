@@ -2850,8 +2850,6 @@ static int setup_upvals(lua_State* L)
         struct {char ch; complex_float v;} cf;
         struct {char ch; complex_double v;} cd;
 
-#define ALIGNOF(S) ((int) ((char*) &S.v - (char*) &S - 1))
-
         push_builtin(L, &ct, "void", VOID_TYPE, 0, 0);
         push_builtin(L, &ct, "bool", BOOL_TYPE, sizeof(_Bool), sizeof(_Bool) -1);
         push_builtin(L, &ct, "uint8_t", UINT8_TYPE, sizeof(uint8_t), 0);

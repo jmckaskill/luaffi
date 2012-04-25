@@ -1043,6 +1043,102 @@ static int parse_attribute(lua_State* L, struct parser* P, struct token* tok, st
                 ct->align_mask = 0;
                 ct->is_packed = 1;
 
+            } else if (IS_LITERAL(*tok, "mode") || IS_LITERAL(*tok, "__mode__")) {
+                int is_unsigned = 0;
+                int is_float = 0;
+
+                check_token(L, P, TOK_OPEN_PAREN, NULL, "expected mode(MODE) on line %d", P->line);
+
+                require_token(L, P, tok);
+                if (tok->type != TOK_TOKEN) {
+                    luaL_error(L, "expected mode(MODE) on line %d", P->line);
+                }
+
+                switch (ct->type) {
+                case INT8_TYPE:
+                case INT16_TYPE:
+                case INT32_TYPE:
+                case INT64_TYPE:
+                    break;
+
+                case UINT8_TYPE:
+                case UINT16_TYPE:
+                case UINT32_TYPE:
+                case UINT64_TYPE:
+                    is_unsigned = 1;
+                    break;
+
+                case FLOAT_TYPE:
+                case DOUBLE_TYPE:
+                    is_float = 1;
+                    break;
+
+                default:
+                    luaL_error(L, "unexpected base type for mode attribute on line %d", P->line);
+                }
+
+                if (is_float) {
+                    struct {char ch; float v;} af;
+                    struct {char ch; double v;} ad;
+
+                    if (IS_LITERAL(*tok, "SF") || IS_LITERAL(*tok, "__SF__")) {
+                        ct->type = FLOAT_TYPE;
+                        ct->base_size = sizeof(float);
+                        ct->align_mask = ALIGNOF(af);
+
+                    } else if (IS_LITERAL(*tok, "DF") || IS_LITERAL(*tok, "__DF__")) {
+                        ct->type = DOUBLE_TYPE;
+                        ct->base_size = sizeof(double);
+                        ct->align_mask = ALIGNOF(ad);
+
+                    } else {
+                        luaL_error(L, "unexpected mode on line %d", P->line);
+                    }
+
+                } else {
+                    struct {char ch; uint16_t v;} a16;
+                    struct {char ch; uint32_t v;} a32;
+                    struct {char ch; uint64_t v;} a64;
+
+                    if (IS_LITERAL(*tok, "QI") || IS_LITERAL(*tok, "__QI__")
+                            || IS_LITERAL(*tok, "byte") || IS_LITERAL(*tok, "__byte__")
+                            ) {
+                        ct->type = is_unsigned ? UINT8_TYPE : INT8_TYPE;
+                        ct->base_size = sizeof(uint8_t);
+                        ct->align_mask = 0;
+
+                    } else if (IS_LITERAL(*tok, "HI") || IS_LITERAL(*tok, "__HI__")) {
+                        ct->type = is_unsigned ? UINT16_TYPE : INT16_TYPE;
+                        ct->base_size = sizeof(uint16_t);
+                        ct->align_mask = ALIGNOF(a16);
+
+                    } else if (IS_LITERAL(*tok, "SI") || IS_LITERAL(*tok, "__SI__")
+#if defined ARCH_X86 || defined ARCH_ARM
+                            || IS_LITERAL(*tok, "word") || IS_LITERAL(*tok, "__word__")
+                            || IS_LITERAL(*tok, "pointer") || IS_LITERAL(*tok, "__pointer__")
+#endif
+                            ) {
+                        ct->type = is_unsigned ? UINT32_TYPE : INT32_TYPE;
+                        ct->base_size = sizeof(uint32_t);
+                        ct->align_mask = ALIGNOF(a32);
+
+                    } else if (IS_LITERAL(*tok, "DI") || IS_LITERAL(*tok, "__DI__")
+#if defined ARCH_X64
+                            || IS_LITERAL(*tok, "word") || IS_LITERAL(*tok, "__word__")
+                            || IS_LITERAL(*tok, "pointer") || IS_LITERAL(*tok, "__pointer__")
+#endif
+                            ) {
+                        ct->type = is_unsigned ? UINT64_TYPE : INT64_TYPE;
+                        ct->base_size = sizeof(uint64_t);
+                        ct->align_mask = ALIGNOF(a64);
+
+                    } else {
+                        luaL_error(L, "unexpected mode on line %d", P->line);
+                    }
+                }
+
+                check_token(L, P, TOK_CLOSE_PAREN, NULL, "expected mode(MODE) on line %d", P->line);
+
             } else if (IS_LITERAL(*tok, "cdecl") || IS_LITERAL(*tok, "__cdecl__")) {
                 ct->calling_convention = C_CALL;
 

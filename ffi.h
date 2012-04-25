@@ -303,6 +303,8 @@ enum {
 #define POINTER_BITS 2
 #define POINTER_MAX ((1 << POINTER_BITS) - 1)
 
+#define ALIGNOF(S) ((int) ((char*) &S.v - (char*) &S - 1))
+
 /* Note: if adding a new member that is associated with a struct/union
  * definition then it needs to be copied over in ctype.c:set_defined for when
  * we create types based off of the declaration alone.
