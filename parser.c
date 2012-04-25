@@ -1721,6 +1721,11 @@ void parse_argument(lua_State* L, struct parser* P, int ct_usr, struct ctype* ty
             } else if (tok.type == TOK_CLOSE_SQUARE) {
                 type->array_size = 0;
 
+            } else if (tok.type == TOK_TOKEN && IS_LITERAL(tok, "__restrict")) {
+                /* odd gcc extension foo[__restrict] for arguments */
+                type->array_size = 0;
+                check_token(L, P, TOK_CLOSE_SQUARE, "", "invalid character in array on line %d", P->line);
+
             } else {
                 int64_t asize;
                 put_back(P);
