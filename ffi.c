@@ -2928,7 +2928,15 @@ static int setup_upvals(lua_State* L)
 
         if (sizeof(va_list) == sizeof(char*)) {
             add_typedef(L, "char*", "va_list");
+        } else {
+            struct {char ch; va_list v;} av;
+            lua_pushfstring(L, "struct {char data[%d] __attribute__((align(%d)));}", (int) sizeof(va_list), (int) ALIGNOF(av) + 1);
+            add_typedef(L, lua_tostring(L, -1), "va_list");
+            lua_pop(L, 1);
         }
+
+        add_typedef(L, "va_list", "__builtin_va_list");
+        add_typedef(L, "va_list", "__gnuc_va_list");
     }
 
     assert(lua_gettop(L) == 1);
