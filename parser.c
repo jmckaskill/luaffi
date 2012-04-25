@@ -980,14 +980,14 @@ static int parse_attribute(lua_State* L, struct parser* P, struct token* tok, st
     if (tok->type != TOK_TOKEN) {
         return 0;
 
-    } else if (asmname && IS_LITERAL(*tok, "__asm")) {
-        check_token(L, P, TOK_OPEN_PAREN, NULL, "unexpected token after __asm on line %d", P->line);
+    } else if (asmname && IS_LITERAL(*tok, "__asm__")) {
+        check_token(L, P, TOK_OPEN_PAREN, NULL, "unexpected token after __asm__ on line %d", P->line);
         require_token(L, P, tok);
         if (tok->type != TOK_STRING) {
-            luaL_error(L, "unexpected token after __asm on line %d", P->line);
+            luaL_error(L, "unexpected token after __asm__ on line %d", P->line);
         }
         *asmname = *tok;
-        check_token(L, P, TOK_CLOSE_PAREN, NULL, "unexpected token after __asm on line %d", P->line);
+        check_token(L, P, TOK_CLOSE_PAREN, NULL, "unexpected token after __asm__ on line %d", P->line);
         return 1;
 
     } else if (IS_LITERAL(*tok, "__attribute__") || IS_LITERAL(*tok, "__declspec")) {

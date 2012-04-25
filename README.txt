@@ -83,7 +83,7 @@ Todo
 - Linking with global values
 - Alternate GCC keywords with __ eg __const__
 - GCC __extension__ and __align__ keywords
-- asm("") and __asm("") for symbol redirection
+- asm("") and __asm__("") for symbol redirection
 - MSVC fixed size types __int8, etc
 - MSVC __declspec keywords
 - __builtin_va_list and __gnuc_va_list
