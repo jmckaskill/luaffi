@@ -842,10 +842,13 @@ static int parse_type_name(lua_State* L, struct parser* P)
         INT = 0x10,
         CHAR = 0x20,
         LONG_LONG = 0x40,
-        INT32 = 0x80,
-        DOUBLE = 0x100,
-        FLOAT = 0x200,
-        COMPLEX = 0x400,
+        INT8 = 0x80,
+        INT16 = 0x100,
+        INT32 = 0x200,
+        INT64 = 0x400,
+        DOUBLE = 0x800,
+        FLOAT = 0x1000,
+        COMPLEX = 0x2000,
     };
 
     require_token(L, P, &tok);
@@ -868,10 +871,14 @@ static int parse_type_name(lua_State* L, struct parser* P)
             flags |= (flags & LONG) ? LONG_LONG : LONG;
         } else if (IS_LITERAL(tok, "int")) {
             flags |= INT;
+        } else if (IS_LITERAL(tok, "__int8")) {
+            flags |= INT8;
+        } else if (IS_LITERAL(tok, "__int16")) {
+            flags |= INT16;
         } else if (IS_LITERAL(tok, "__int32")) {
             flags |= INT32;
         } else if (IS_LITERAL(tok, "__int64")) {
-            flags |= LONG_LONG;
+            flags |= INT64;
         } else if (IS_LITERAL(tok, "double")) {
             flags |= DOUBLE;
         } else if (IS_LITERAL(tok, "float")) {
@@ -900,12 +907,14 @@ static int parse_type_name(lua_State* L, struct parser* P)
             lua_pushstring(L, (((char) -1) > 0) ? "uint8_t" : "int8_t");
         }
 
+    } else if (flags & INT8) {
+        lua_pushstring(L, (flags & UNSIGNED) ? "uint8_t" : "int8_t");
+    } else if (flags & INT16) {
+        lua_pushstring(L, (flags & UNSIGNED) ? "uint16_t" : "int16_t");
     } else if (flags & INT32) {
-        if (flags & UNSIGNED) {
-            lua_pushliteral(L, "uint32_t");
-        } else {
-            lua_pushliteral(L, "int32_t");
-        }
+        lua_pushstring(L, (flags & UNSIGNED) ? "uint32_t" : "int32_t");
+    } else if (flags & (INT64 | LONG_LONG)) {
+        lua_pushstring(L, (flags & UNSIGNED) ? "uint64_t" : "int64_t");
 
     } else if (flags & COMPLEX) {
         if (flags & LONG) {
@@ -925,13 +934,6 @@ static int parse_type_name(lua_State* L, struct parser* P)
 
     } else if (flags & FLOAT) {
         lua_pushliteral(L, "float");
-
-    } else if (flags & LONG_LONG) {
-        if (flags & UNSIGNED) {
-            lua_pushliteral(L, "uint64_t");
-        } else {
-            lua_pushliteral(L, "int64_t");
-        }
 
     } else if (flags & SHORT) {
 #define SHORT_TYPE(u) (sizeof(short) == sizeof(int64_t) ? u "int64_t" : sizeof(short) == sizeof(int32_t) ? u "int32_t" : u "int16_t")
