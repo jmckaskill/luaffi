@@ -1089,11 +1089,11 @@ int parse_type(lua_State* L, struct parser* P, struct ctype* ct)
         if (tok.type != TOK_TOKEN) {
             return luaL_error(L, "unexpected value before type name on line %d", P->line);
 
-        } else if (IS_LITERAL(tok, "const")) {
+        } else if (IS_LITERAL(tok, "const") || IS_LITERAL(tok, "__const__")) {
             ct->const_mask = 1;
             require_token(L, P, &tok);
 
-        } else if (IS_LITERAL(tok, "volatile")) {
+        } else if (IS_LITERAL(tok, "volatile") || IS_LITERAL(tok, "__volatile__")) {
             /* ignored for now */
             require_token(L, P, &tok);
 
@@ -1144,7 +1144,8 @@ int parse_type(lua_State* L, struct parser* P, struct ctype* ct)
             put_back(P);
             break;
 
-        } else if (IS_LITERAL(tok, "const") || IS_LITERAL(tok, "volatile")) {
+        } else if (IS_LITERAL(tok, "const") || IS_LITERAL(tok, "__const__")
+                || IS_LITERAL(tok, "volatile") || IS_LITERAL(tok, "__volatile__")) {
             /* ignore for now */
 
         } else {
@@ -1541,7 +1542,8 @@ void parse_argument(lua_State* L, struct parser* P, int ct_usr, struct ctype* ty
                     } else if (tok.type != TOK_TOKEN) {
                         luaL_error(L, "unexpected token in function on line %d", P->line);
 
-                    } else if (IS_LITERAL(tok, "const") || IS_LITERAL(tok, "volatile")) {
+                    } else if (IS_LITERAL(tok, "const") || IS_LITERAL(tok, "__const__")
+                            || IS_LITERAL(tok, "volatile") || IS_LITERAL(tok, "__volatile__")) {
                         /* ignored for now */
 
                     } else {
@@ -1637,10 +1639,10 @@ void parse_argument(lua_State* L, struct parser* P, int ct_usr, struct ctype* ty
             put_back(P);
             break;
 
-        } else if (IS_LITERAL(tok, "const")) {
+        } else if (IS_LITERAL(tok, "const") || IS_LITERAL(tok, "__const__")) {
             type->const_mask |= 1;
 
-        } else if (IS_LITERAL(tok, "volatile")) {
+        } else if (IS_LITERAL(tok, "volatile") || IS_LITERAL(tok, "__volatile__")) {
             /* ignored for now */
 
         } else {
