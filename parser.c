@@ -1166,6 +1166,10 @@ static int parse_attribute(lua_State* L, struct parser* P, struct token* tok, st
         ct->calling_convention = STD_CALL;
         return 1;
 
+    } else if (IS_LITERAL(*tok, "__extension__") || IS_LITERAL(*tok, "extern")) {
+        /* ignore */
+        return 1;
+
     } else {
         return 0;
     }
@@ -1969,6 +1973,10 @@ static int parse_root(lua_State* L, struct parser* P)
 
         } else if (tok.type != TOK_TOKEN) {
             return luaL_error(L, "unexpected character on line %d", P->line);
+
+        } else if (IS_LITERAL(tok, "__extension__")) {
+            /* ignore */
+            continue;
 
         } else if (IS_LITERAL(tok, "extern")) {
             /* ignore extern as data and functions can only be extern */
