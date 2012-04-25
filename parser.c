@@ -2089,6 +2089,30 @@ int ffi_cdef(lua_State* L)
  * precedence and above. calculate_constant1 is the highest precedence
  */
 
+static int try_cast(lua_State* L)
+{
+    struct parser* P = (struct parser*) lua_touserdata(L, 1);
+    struct ctype ct;
+    struct token name, tok;
+    memset(&name, 0, sizeof(name));
+
+    parse_type(L, P, &ct);
+    parse_argument(L, P, -1, &ct, &name, NULL);
+
+    require_token(L, P, &tok);
+    if (tok.type != TOK_CLOSE_PAREN || name.size) {
+        return luaL_error(L, "invalid cast");
+    }
+
+    if (ct.pointers || ct.type != INT32_TYPE) {
+        return luaL_error(L, "unsupported cast on line %d", P->line);
+    }
+
+    return 0;
+}
+
+static int64_t calculate_constant2(lua_State* L, struct parser* P, struct token* tok);
+
 /* () */
 static int64_t calculate_constant1(lua_State* L, struct parser* P, struct token* tok)
 {
@@ -2117,6 +2141,19 @@ static int64_t calculate_constant1(lua_State* L, struct parser* P, struct token*
         return ret;
 
     } else if (tok->type == TOK_OPEN_PAREN) {
+        struct parser before_cast = *P;
+        int top = lua_gettop(L);
+
+        /* see if this is a numeric cast, which we ignore */
+        lua_pushcfunction(L, &try_cast);
+        lua_pushlightuserdata(L, P);
+        if (!lua_pcall(L, 1, 0, 0)) {
+            next_token(L, P, tok);
+            return calculate_constant2(L, P, tok);
+        }
+        lua_settop(L, top);
+
+        *P = before_cast;
         ret = calculate_constant(L, P);
 
         require_token(L, P, tok);
