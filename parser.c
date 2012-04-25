@@ -1598,7 +1598,7 @@ void parse_argument(lua_State* L, struct parser* P, int ct_usr, struct ctype* ty
 
         } else if (tok.type == TOK_STAR) {
             if (type->pointers == POINTER_MAX) {
-                luaL_error(L, "maximum number of pointer derefs reached - use a struct to break up the pointers");
+                luaL_error(L, "maximum number of pointer derefs reached - use a struct to break up the pointers on line %d", P->line);
             }
 
             type->pointers++;
