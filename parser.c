@@ -2415,12 +2415,16 @@ static int64_t calculate_constant12(lua_State* L, struct parser* P, struct token
 /* ternary ?: (right associative) */
 static int64_t calculate_constant13(lua_State* L, struct parser* P, struct token* tok)
 {
-    int64_t middle, right;
     int64_t left = calculate_constant12(L, P, tok);
 
     if (tok->type == TOK_QUESTION) {
+        int64_t middle, right;
         require_token(L, P, tok);
         middle = calculate_constant13(L, P, tok);
+        if (tok->type != TOK_COLON) {
+            luaL_error(L, "invalid ternery (? :) in constant on line %d", P->line);
+        }
+        require_token(L, P, tok);
         right = calculate_constant13(L, P, tok);
         return left ? middle : right;
 
