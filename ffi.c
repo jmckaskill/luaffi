@@ -2090,7 +2090,8 @@ static const char* etype_tostring(int type)
     case ENUM_TYPE: return "enum";
     case UNION_TYPE: return "union";
     case STRUCT_TYPE: return "struct";
-    case FUNCTION_PTR_TYPE: return "func";
+    case FUNCTION_PTR_TYPE: return "function ptr";
+    case FUNCTION_TYPE: return "function";
     default: return "invalid";
     }
 }

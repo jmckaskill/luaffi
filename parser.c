@@ -1189,6 +1189,7 @@ static void append_type_name(luaL_Buffer* B, int usr, const struct ctype* ct)
         luaL_addstring(B, "union ");
         goto get_name;
 
+    case FUNCTION_TYPE:
     case FUNCTION_PTR_TYPE:
     get_name:
         lua_pushlightuserdata(L, &g_name_key);
