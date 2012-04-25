@@ -38,7 +38,7 @@ int max_alignment();
 bool is_msvc;
 bool is_msvc2 __asm__("is_msvc");
 bool have_complex();
-bool have_complex2() __asm__("have\x5Fcomplex"); // 5F is _
+bool have_complex2() __asm__("have" /*foo*/ "\x5F" "complex"); // 5F is _
 
 int8_t add_i8(int8_t a, int8_t b);
 uint8_t add_u8(uint8_t a, uint8_t b);

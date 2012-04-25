@@ -116,16 +116,11 @@ static void luaL_setfuncs (lua_State *L, const luaL_Reg *l, int nup) {
 #define lua_setuservalue lua_setfenv
 #define lua_getuservalue lua_getfenv
 #define lua_rawlen lua_objlen
-static char* luaL_buffinitsize(lua_State* L, luaL_Buffer* B, size_t sz) {
+static char* luaL_prepbuffsize(luaL_Buffer* B, size_t sz) {
     if (sz > LUAL_BUFFERSIZE) {
-        luaL_error(L, "string too long");
+        luaL_error(B->L, "string too long");
     }
-    luaL_buffinit(L, B);
     return luaL_prepbuffer(B);
-}
-static void luaL_pushresultsize(luaL_Buffer* B, size_t sz) {
-    luaL_addsize(B, sz);
-    luaL_pushresult(B);
 }
 #endif
 
@@ -407,7 +402,7 @@ void* check_cdata(lua_State* L, int idx, struct ctype* ct);
 size_t ctype_size(lua_State* L, const struct ctype* ct);
 
 int parse_type(lua_State* L, struct parser* P, struct ctype* type);
-void parse_argument(lua_State* L, struct parser* P, int ct_usr, struct ctype* type, struct token* name, struct token* asmname);
+void parse_argument(lua_State* L, struct parser* P, int ct_usr, struct ctype* type, struct token* name, struct parser* asmname);
 void push_type_name(lua_State* L, int usr, const struct ctype* ct);
 
 int push_user_mt(lua_State* L, int ct_usr, const struct ctype* ct);

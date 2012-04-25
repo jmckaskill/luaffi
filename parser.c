@@ -979,19 +979,23 @@ static int parse_type_name(lua_State* L, struct parser* P)
  * more following it) or 0 if not. If the token was used, the next token must
  * be retrieved using next_token/require_token.
  */
-static int parse_attribute(lua_State* L, struct parser* P, struct token* tok, struct ctype* ct, struct token* asmname)
+static int parse_attribute(lua_State* L, struct parser* P, struct token* tok, struct ctype* ct, struct parser* asmname)
 {
     if (tok->type != TOK_TOKEN) {
         return 0;
 
     } else if (asmname && IS_LITERAL(*tok, "__asm__")) {
         check_token(L, P, TOK_OPEN_PAREN, NULL, "unexpected token after __asm__ on line %d", P->line);
+        *asmname = *P;
+
         require_token(L, P, tok);
-        if (tok->type != TOK_STRING) {
+        while (tok->type == TOK_STRING) {
+            require_token(L, P, tok);
+        }
+
+        if (tok->type != TOK_CLOSE_PAREN) {
             luaL_error(L, "unexpected token after __asm__ on line %d", P->line);
         }
-        *asmname = *tok;
-        check_token(L, P, TOK_CLOSE_PAREN, NULL, "unexpected token after __asm__ on line %d", P->line);
         return 1;
 
     } else if (IS_LITERAL(*tok, "__attribute__") || IS_LITERAL(*tok, "__declspec")) {
@@ -1476,7 +1480,7 @@ static int max_bitfield_size(int type)
  *
  * pushes the updated user value on the top of the stack
  */
-void parse_argument(lua_State* L, struct parser* P, int ct_usr, struct ctype* type, struct token* name, struct token* asmname)
+void parse_argument(lua_State* L, struct parser* P, int ct_usr, struct ctype* type, struct token* name, struct parser* asmname)
 {
     struct token tok;
     int top = lua_gettop(L);
@@ -1725,69 +1729,82 @@ static int from_hex(char ch)
     }
 }
 
-static void push_string_token(lua_State* L, struct token* tok)
+static void push_strings(lua_State* L, struct parser* P)
 {
-    const char* p = tok->str;
-    const char* e = p + tok->size;
     luaL_Buffer B;
+    luaL_buffinit(L, &B);
 
-    char* t = luaL_buffinitsize(L, &B, tok->size);
-    char* s = t;
+    for (;;) {
+        const char *p, *e;
+        char *t, *s;
+        struct token tok;
 
-    assert(tok->type == TOK_STRING);
-
-    while (p < e) {
-        if (*p == '\\') {
-            if (++p == e) {
-                luaL_error(L, "parse error in string");
-            }
-            switch (*p) {
-            case '\\': *(t++) = '\\'; p++; break;
-            case '\"': *(t++) = '\"'; p++; break;
-            case '\'': *(t++) = '\''; p++; break;
-            case 'n': *(t++) = '\n'; p++; break;
-            case 'r': *(t++) = '\r'; p++; break;
-            case 'b': *(t++) = '\b'; p++; break;
-            case 't': *(t++) = '\t'; p++; break;
-            case 'f': *(t++) = '\f'; p++; break;
-            case 'a': *(t++) = '\a'; p++; break;
-            case 'v': *(t++) = '\v'; p++; break;
-            case 'e': *(t++) = 0x1B; p++; break;
-            case 'x':
-                {
-                    uint8_t u;
-                    p++;
-                    if (p + 2 > e || !is_hex(p[0]) || !is_hex(p[1])) {
-                        luaL_error(L, "parse error in string");
-                    }
-                    u = (from_hex(p[0]) << 4) | from_hex(p[1]);
-                    *(t++) = *(char*) &u;
-                    p += 2;
-                    break;
-                }
-            default:
-                {
-                    uint8_t u;
-                    const char* e2 = min(p + 3, e);
-                    if (!is_digit(*p)) {
-                        luaL_error(L, "parse error in string");
-                    }
-                    u = *p - '0';
-                    p++;
-                    while (is_digit(*p) && p < e2) {
-                        u = 10*u + *p-'0';
-                        p++;
-                    }
-                    *(t++) = *(char*) &u;
-                    break;
-                }
-            }
-        } else {
-            *(t++) = *(p++);
+        require_token(L, P, &tok);
+        if (tok.type != TOK_STRING) {
+            break;
         }
+
+        p = tok.str;
+        e = p + tok.size;
+
+        t = luaL_prepbuffsize(&B, tok.size);
+        s = t;
+
+        while (p < e) {
+            if (*p == '\\') {
+                if (++p == e) {
+                    luaL_error(L, "parse error in string");
+                }
+                switch (*p) {
+                case '\\': *(t++) = '\\'; p++; break;
+                case '\"': *(t++) = '\"'; p++; break;
+                case '\'': *(t++) = '\''; p++; break;
+                case 'n': *(t++) = '\n'; p++; break;
+                case 'r': *(t++) = '\r'; p++; break;
+                case 'b': *(t++) = '\b'; p++; break;
+                case 't': *(t++) = '\t'; p++; break;
+                case 'f': *(t++) = '\f'; p++; break;
+                case 'a': *(t++) = '\a'; p++; break;
+                case 'v': *(t++) = '\v'; p++; break;
+                case 'e': *(t++) = 0x1B; p++; break;
+                case 'x':
+                    {
+                        uint8_t u;
+                        p++;
+                        if (p + 2 > e || !is_hex(p[0]) || !is_hex(p[1])) {
+                            luaL_error(L, "parse error in string");
+                        }
+                        u = (from_hex(p[0]) << 4) | from_hex(p[1]);
+                        *(t++) = *(char*) &u;
+                        p += 2;
+                        break;
+                    }
+                default:
+                    {
+                        uint8_t u;
+                        const char* e2 = min(p + 3, e);
+                        if (!is_digit(*p)) {
+                            luaL_error(L, "parse error in string");
+                        }
+                        u = *p - '0';
+                        p++;
+                        while (is_digit(*p) && p < e2) {
+                            u = 10*u + *p-'0';
+                            p++;
+                        }
+                        *(t++) = *(char*) &u;
+                        break;
+                    }
+                }
+            } else {
+                *(t++) = *(p++);
+            }
+        }
+
+        luaL_addsize(&B, t-s);
     }
 
-    luaL_pushresultsize(&B, t-s);
+    luaL_pushresult(&B);
 }
 
 #define END 0
@@ -1889,7 +1906,8 @@ static int parse_root(lua_State* L, struct parser* P)
         } else {
             /* type declaration, type definition, or function declaration */
             struct ctype type;
-            struct token name, asmname;
+            struct token name;
+            struct parser asmname;
 
             memset(&name, 0, sizeof(name));
             memset(&asmname, 0, sizeof(asmname));
@@ -1904,10 +1922,10 @@ static int parse_root(lua_State* L, struct parser* P)
                 /* global/function declaration */
 
                 /* set asmname_tbl[name] = asmname */
-                if (asmname.size) {
+                if (asmname.next) {
                     push_upval(L, &asmname_key);
                     lua_pushlstring(L, name.str, name.size);
-                    push_string_token(L, &asmname);
+                    push_strings(L, &asmname);
                     lua_rawset(L, -3);
                     lua_pop(L, 1); /* asmname upval */
                 }
