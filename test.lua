@@ -13,7 +13,9 @@ if ffi.arch == 'x86' and ffi.os == 'Windows' then
 end
 
 local function check(a, b)
-    --print('check', a, b)
+    if a ~= b then
+        print('check', a, b)
+    end
     return _G.assert(a == b)
 end
 
@@ -719,6 +721,11 @@ assert(ffi.istype('double', ffi.new('float8')))
 
 ffi.cdef('void register_foo(register int val);')
 check(tostring(ffi.debug().functions.register_foo):match('%b<>'), '<void (*)(int)>')
+
+ffi.cdef [[
+    typedef struct __sFILE FILE;
+    FILE *fopen(const char * , const char * ) __asm("_" "fopen" );
+]]
 
 print('Test PASSED')
 

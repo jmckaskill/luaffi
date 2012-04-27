@@ -986,7 +986,7 @@ static int parse_attribute(lua_State* L, struct parser* P, struct token* tok, st
     if (tok->type != TOK_TOKEN) {
         return 0;
 
-    } else if (asmname && IS_LITERAL(*tok, "__asm__")) {
+    } else if (asmname && (IS_LITERAL(*tok, "__asm__") || IS_LITERAL(*tok, "__asm"))) {
         check_token(L, P, TOK_OPEN_PAREN, NULL, "unexpected token after __asm__ on line %d", P->line);
         *asmname = *P;
 
