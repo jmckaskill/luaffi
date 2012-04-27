@@ -677,5 +677,9 @@ __attribute__((dllimport)) void __attribute__((__cdecl__)) alEnable( ALenum capa
 
 check(ffi.sizeof('struct {char foo[alignof(uint64_t)];}'), ffi.alignof('uint64_t'))
 
+-- Long double is not supported yet but it should be parsed
+ffi.cdef('long double foo(long double val);')
+check(tostring(ffi.debug().functions.foo):match('ctype(%b<>)'), '<long double (*)(long double)>')
+
 print('Test PASSED')
 
