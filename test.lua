@@ -692,5 +692,30 @@ check(ffi.sizeof('struct {char foo[alignof(uint64_t)];}'), ffi.alignof('uint64_t
 ffi.cdef('long double foo(long double val);')
 check(tostring(ffi.debug().functions.foo):match('ctype(%b<>)'), '<long double (*)(long double)>')
 
+ffi.cdef [[
+typedef int byte1 __attribute__(mode(QI));
+typedef int byte2 __attribute__(mode(HI));
+typedef int byte4 __attribute__(mode(SI));
+typedef int byte8 __attribute__(mode(DI));
+typedef unsigned ubyte8 __attribute__(mode(DI));
+typedef int word __attribute__(mode(word));
+typedef int pointer __attribute__(mode(pointer));
+typedef int byte __attribute__(mode(byte));
+typedef float float4 __attribute__(mode(SF));
+typedef float float8 __attribute__(mode(DF));
+]]
+assert(ffi.istype('int8_t', ffi.new('byte1')))
+assert(ffi.istype('int16_t', ffi.new('byte2')))
+assert(ffi.istype('int32_t', ffi.new('byte4')))
+assert(ffi.istype('int64_t', ffi.new('byte8')))
+assert(ffi.istype('uint64_t', ffi.new('ubyte8')))
+check(ffi.sizeof('void*'), ffi.sizeof('pointer'))
+check(ffi.alignof('void*'), ffi.alignof('pointer'))
+check(ffi.sizeof('void*'), ffi.sizeof('word'))
+check(ffi.alignof('void*'), ffi.alignof('word'))
+assert(ffi.istype('int8_t', ffi.new('byte')))
+assert(ffi.istype('float', ffi.new('float4')))
+assert(ffi.istype('double', ffi.new('float8')))
+
 print('Test PASSED')
 
