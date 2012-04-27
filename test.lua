@@ -727,5 +727,12 @@ ffi.cdef [[
     FILE *fopen(const char * , const char * ) __asm("_" "fopen" );
 ]]
 
+assert(not ffi.istype('int', ffi.new('int*')))
+assert(not ffi.istype('int[]', ffi.new('int*')))
+assert(not ffi.istype('int[3]', ffi.new('int*')))
+assert(not ffi.istype('int[3]', ffi.new('int[2]')))
+assert(ffi.istype('const int[3]', ffi.new('const int[3]')))
+assert(ffi.istype('int[3]', ffi.new('const int[3]')))
+
 print('Test PASSED')
 

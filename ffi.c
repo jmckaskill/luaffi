@@ -1077,12 +1077,24 @@ static int ffi_istype(lua_State* L)
         goto fail;
     }
 
+    if (tt.is_array != ft.is_array) {
+        goto fail;
+    }
+
+    if (tt.is_array && tt.array_size != ft.array_size) {
+        goto fail;
+    }
+
+    if (tt.calling_convention != ft.calling_convention) {
+        goto fail;
+    }
+
     lua_pushboolean(L, 1);
     return 1;
 
 fail:
     lua_pushboolean(L, 0);
-    return 0;
+    return 1;
 }
 
 static int cdata_gc(lua_State* L)
