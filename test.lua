@@ -564,6 +564,17 @@ for convention,c in pairs(dlls) do
     ffi.cdef(gccattr[convention])
     check(c.test_pow(5), 25)
 
+    ffi.cdef [[
+        int va_list_size, va_list_align;
+        int vsnprintf(char* buf, size_t sz, const char* fmt, va_list ap);
+    ]]
+    ffi.new('va_list')
+    assert(ffi.debug().functions.vsnprintf ~= nil)
+    assert(ffi.istype('va_list', ffi.new('__builtin_va_list')))
+    assert(ffi.istype('va_list', ffi.new('__gnuc_va_list')))
+    check(ffi.sizeof('va_list'), c.va_list_size)
+    check(ffi.alignof('va_list'), c.va_list_align)
+
     first = false
 end
 

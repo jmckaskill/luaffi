@@ -6,6 +6,7 @@
 #include <inttypes.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include <stdarg.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -660,4 +661,7 @@ int get_errno(void) {
 #endif
 }
 
+EXPORT int va_list_size, va_list_align;
+int va_list_size = sizeof(va_list);
+int va_list_align = alignof(va_list);
 
