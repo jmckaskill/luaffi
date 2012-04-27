@@ -717,5 +717,8 @@ assert(ffi.istype('int8_t', ffi.new('byte')))
 assert(ffi.istype('float', ffi.new('float4')))
 assert(ffi.istype('double', ffi.new('float8')))
 
+ffi.cdef('void register_foo(register int val);')
+check(tostring(ffi.debug().functions.register_foo):match('%b<>'), '<void (*)(int)>')
+
 print('Test PASSED')
 
