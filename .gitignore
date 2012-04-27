@@ -18,3 +18,4 @@ call_*.h
 *.dSYM
 *.vcproj
 /luaffi
+/test_includes/
