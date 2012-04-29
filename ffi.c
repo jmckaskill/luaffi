@@ -387,12 +387,12 @@ static void* check_pointer(lua_State* L, int idx, struct ctype* ct)
     case LUA_TNIL:
         ct->type = VOID_TYPE;
         ct->is_null = 1;
-        push_niluv(L);
+        lua_pushnil(L);
         return NULL;
 
     case LUA_TLIGHTUSERDATA:
         ct->type = VOID_TYPE;
-        push_niluv(L);
+        lua_pushnil(L);
         return lua_touserdata(L, idx);
 
     case LUA_TSTRING:
@@ -400,7 +400,7 @@ static void* check_pointer(lua_State* L, int idx, struct ctype* ct)
         ct->is_array = 1;
         ct->base_size = 1;
         ct->const_mask = 2;
-        push_niluv(L);
+        lua_pushnil(L);
         return (void*) lua_tolstring(L, idx, &ct->array_size);
 
     case LUA_TUSERDATA:
@@ -432,7 +432,29 @@ static int is_void_ptr(const struct ctype* ct)
 
 static int is_same_type(lua_State* L, int usr1, int usr2, const struct ctype* t1, const struct ctype* t2)
 {
-    return t1->type == t2->type && lua_rawequal(L, usr1, usr2);
+    if (t1->type != t2->type) {
+        return 0;
+    }
+
+#if LUA_VERSION_NUM == 501
+    if (lua_isnil(L, usr1) != lua_isnil(L, usr2)) {
+        int ret;
+        usr1 = lua_absindex(L, usr1);
+        usr2 = lua_absindex(L, usr2);
+        push_upval(L, &niluv_key);
+
+        ret = lua_rawequal(L, usr1, -1)
+            || lua_rawequal(L, usr2, -1);
+
+        lua_pop(L, 1);
+
+        if (ret) {
+            return 1;
+        }
+    }
+#endif
+
+    return lua_rawequal(L, usr1, usr2);
 }
 
 static void set_struct(lua_State* L, int idx, void* to, int to_usr, const struct ctype* tt, int check_pointers);
@@ -558,7 +580,7 @@ static cfunction check_cfunction(lua_State* L, int idx, int to_usr, const struct
         } else if (ft.calling_convention != tt->calling_convention) {
             goto err;
 
-        } else if (!lua_rawequal(L, -1, to_usr)) {
+        } else if (!is_same_type(L, -1, to_usr, &ft, tt)) {
             goto err;
 
         } else {
@@ -2746,13 +2768,20 @@ static void push_builtin(lua_State* L, struct ctype* ct, const char* name, int t
     ct->is_defined = 1;
 
     push_upval(L, &types_key);
-    push_niluv(L);
-    push_ctype(L, -1, ct);
+    push_ctype(L, 0, ct);
+    lua_setfield(L, -2, name);
+    lua_pop(L, 1); /* types */
+}
 
-    /* stack is at +3: types, usr (nil), ctype */
+static void push_builtin_undef(lua_State* L, struct ctype* ct, const char* name, int type)
+{
+    memset(ct, 0, sizeof(*ct));
+    ct->type = type;
 
-    lua_setfield(L, -3, name);
-    lua_pop(L, 2); /* types, nil usr */
+    push_upval(L, &types_key);
+    push_ctype(L, 0, ct);
+    lua_setfield(L, -2, name);
+    lua_pop(L, 1); /* types */
 }
 
 static void add_typedef(lua_State* L, const char* from, const char* to)
@@ -2882,12 +2911,16 @@ static int setup_upvals(lua_State* L)
         push_builtin(L, &ct, "double", DOUBLE_TYPE, sizeof(double), ALIGNOF(ad));
 #ifdef HAVE_LONG_DOUBLE
         push_builtin(L, &ct, "long double", LONG_DOUBLE_TYPE, sizeof(long double), ALIGNOF(ald));
+#else
+        push_builtin_undef(L, &ct, "long double", LONG_DOUBLE_TYPE);
 #endif
         push_builtin(L, &ct, "uintptr_t", UINTPTR_TYPE, sizeof(uintptr_t), ALIGNOF(aptr));
         push_builtin(L, &ct, "complex float", COMPLEX_FLOAT_TYPE, sizeof(complex_float), ALIGNOF(cf));
         push_builtin(L, &ct, "complex double", COMPLEX_DOUBLE_TYPE, sizeof(complex_double), ALIGNOF(cd));
 #if defined HAVE_LONG_DOUBLE && defined HAVE_COMPLEX
         push_builtin(L, &ct, "complex long double", COMPLEX_LONG_DOUBLE_TYPE, sizeof(complex long double), ALIGNOF(cld));
+#else
+        push_builtin_undef(L, &ct, "complex long double", COMPLEX_LONG_DOUBLE_TYPE);
 #endif
 
         /* add NULL and i constants */

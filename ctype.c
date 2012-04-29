@@ -90,18 +90,18 @@ void push_ctype(lua_State* L, int ct_usr, const struct ctype* ct)
     lua_setmetatable(L, -2);
 
 #if LUA_VERSION_NUM == 501
-    if (lua_isnil(L, ct_usr)) {
-        push_niluv(L);
+    if (!ct_usr || lua_isnil(L, ct_usr)) {
+        push_upval(L, &niluv_key);
         lua_setfenv(L, -2);
     }
 #endif
 
-    if (!lua_isnil(L, ct_usr)) {
+    if (ct_usr && !lua_isnil(L, ct_usr)) {
         lua_pushvalue(L, ct_usr);
         lua_setuservalue(L, -2);
     }
 
-    if (!ct->is_defined) {
+    if (!ct->is_defined && ct_usr && !lua_isnil(L, ct_usr)) {
         update_on_definition(L, ct_usr, -1);
     }
 }
@@ -168,7 +168,7 @@ void* push_cdata(lua_State* L, int ct_usr, const struct ctype* ct)
     push_upval(L, &cdata_mt_key);
     lua_setmetatable(L, -2);
 
-    if (!ct->is_defined) {
+    if (!ct->is_defined && ct_usr && !lua_isnil(L, ct_usr)) {
         update_on_definition(L, ct_usr, -1);
     }
 
@@ -226,13 +226,13 @@ void* to_cdata(lua_State* L, int idx, struct ctype* ct)
 
     ct->type = INVALID_TYPE;
     if (!lua_isuserdata(L, idx) || !lua_getmetatable(L, idx)) {
-        push_niluv(L);
+        lua_pushnil(L);
         return NULL;
     }
 
     if (!equals_upval(L, -1, &cdata_mt_key)) {
         lua_pop(L, 1); /* mt */
-        push_niluv(L);
+        lua_pushnil(L);
         return NULL;
     }
 
