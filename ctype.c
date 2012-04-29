@@ -78,7 +78,7 @@ void set_defined(lua_State* L, int ct_usr, struct ctype* ct)
     }
 }
 
-void push_ctype(lua_State* L, int ct_usr, const struct ctype* ct)
+struct ctype* push_ctype(lua_State* L, int ct_usr, const struct ctype* ct)
 {
     struct ctype* ret;
     ct_usr = lua_absindex(L, ct_usr);
@@ -104,6 +104,8 @@ void push_ctype(lua_State* L, int ct_usr, const struct ctype* ct)
     if (!ct->is_defined && ct_usr && !lua_isnil(L, ct_usr)) {
         update_on_definition(L, ct_usr, -1);
     }
+
+    return ret;
 }
 
 size_t ctype_size(lua_State* L, const struct ctype* ct)

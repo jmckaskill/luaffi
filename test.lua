@@ -38,7 +38,7 @@ enum e32 {
 };
 int max_alignment();
 bool is_msvc, is_msvc2 __asm__("is_msvc");
-bool have_complex();
+bool have_complex(void);
 bool have_complex2() __asm__("have" /*foo*/ "\x5F" "complex"); // 5F is _
 
 int8_t add_i8(int8_t a, int8_t b);
@@ -58,6 +58,9 @@ enum e16 inc_e16(enum e16);
 enum e32 inc_e32(enum e32);
 bool not_b(bool v);
 _Bool not_b2(_Bool v);
+typedef bool (*fp)(bool);
+fp ret_fp(fp v);
+bool (*ret_fp2(bool (*)(bool)))(bool) __asm("ret_fp");
 
 int print_i8(char* buf, int8_t val);
 int print_u8(char* buf, uint8_t val);
@@ -200,7 +203,7 @@ float g_f;
 double g_d;
 double complex g_dc;
 float complex g_fc;
-bool (*g_fp)();
+bool (*g_fp)(bool);
 const char g_s[];
 const char* g_sp;
 void* g_p;
@@ -335,6 +338,8 @@ for convention,c in pairs(dlls) do
     check(c.inc_e8('FOO8'), c.BAR8)
     check(c.inc_e16(c.FOO16), c.BAR16)
     check(c.inc_e32(c.FOO32), c.BAR32)
+    check(c.ret_fp(c.g_fp), c.g_fp)
+    check(c.ret_fp2(c.g_fp), c.g_fp)
 
     if c.have_complex() then
         check(c.add_dc(3+4*i, 4+5*i), 7+9*i)
@@ -733,6 +738,10 @@ assert(not ffi.istype('int[3]', ffi.new('int*')))
 assert(not ffi.istype('int[3]', ffi.new('int[2]')))
 assert(ffi.istype('const int[3]', ffi.new('const int[3]')))
 assert(ffi.istype('int[3]', ffi.new('const int[3]')))
+
+-- Crazy function pointer that takes an int and a function pointer and returns
+-- a function pointer. Type of &signal.
+check(tostring(ffi.typeof('void (*foo(int, void(*)(int)))(int)')):match('%b<>'), '<void (*(*)(int, void (*)(int)))(int)>')
 
 print('Test PASSED')
 

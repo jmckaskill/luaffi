@@ -136,6 +136,10 @@ EXPORT int print_b2(char* buf, _Bool val);
 int print_b(char* buf, _Bool val) {return sprintf(buf, "%s", val ? "true" : "false");}
 int print_b2(char* buf, _Bool val) {return sprintf(buf, "%s", val ? "true" : "false");}
 
+EXPORT bool (*ret_fp(bool (*val)(bool)))(bool);
+bool (*ret_fp(bool (*val)(bool)))(bool)
+{return val;}
+
 #define OFFSETOF(STRUCT, MEMBER) ((int) ((char*) &STRUCT.MEMBER - (char*) &S - 1))
 
 #define ALIGN_UP(VALUE, ALIGNMENT, SUFFIX) \
@@ -609,7 +613,7 @@ EXPORT double g_d;
 EXPORT double complex g_dc;
 EXPORT float complex g_fc;
 #endif
-EXPORT bool (*g_fp)();
+EXPORT bool (*g_fp)(bool);
 EXPORT const char g_s[];
 EXPORT const char* g_sp;
 EXPORT void* g_p;
@@ -633,8 +637,8 @@ double g_d = 5;
 double complex g_dc = 7+8i;
 float complex g_fc = 6+9i;
 #endif
-bool (*g_fp)() = &have_complex;
-void* g_p = (void*) &have_complex;
+bool (*g_fp)(bool) = &not_b;
+void* g_p = (void*) &not_b;
 const char g_s[] = "g_s";
 const char* g_sp = "g_sp";
 enum e8 g_e8 = FOO8;

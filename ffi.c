@@ -2187,38 +2187,54 @@ static int cdata_tostring(lua_State* L)
     char buf[64];
     void* p = check_cdata(L, 1, &ct);
 
-    if (ct.pointers == 0 && ct.type == UINT64_TYPE) {
-        sprintf(buf, "%"PRIu64, *(uint64_t*) p);
-        lua_pushstring(L, buf);
+    if (ct.pointers == 0) {
+        switch (ct.type) {
+        case UINT64_TYPE:
+            sprintf(buf, "%"PRIu64, *(uint64_t*) p);
+            lua_pushstring(L, buf);
+            return 1;
 
-    } else if (ct.pointers == 0 && ct.type == INT64_TYPE) {
-        sprintf(buf, "%"PRId64, *(uint64_t*) p);
-        lua_pushstring(L, buf);
+        case INT64_TYPE:
+            sprintf(buf, "%"PRId64, *(uint64_t*) p);
+            lua_pushstring(L, buf);
+            return 1;
 
-    } else if (ct.pointers == 0 && ct.type == UINTPTR_TYPE) {
-        lua_pushfstring(L, "%p", *(uintptr_t*) p);
+        case UINTPTR_TYPE:
+            lua_pushfstring(L, "%p", *(uintptr_t*) p);
+            return 1;
 
-    } else if (ct.pointers == 0 && ct.type == COMPLEX_DOUBLE_TYPE) {
-        complex_double c = *(complex_double*) p;
-        if (cimag(c) != 0) {
-            lua_pushfstring(L, "%f+%fi", creal(c), cimag(c));
-        } else {
-            lua_pushfstring(L, "%f", creal(c));
+        case COMPLEX_DOUBLE_TYPE:
+            {
+                complex_double c = *(complex_double*) p;
+                if (cimag(c) != 0) {
+                    lua_pushfstring(L, "%f+%fi", creal(c), cimag(c));
+                } else {
+                    lua_pushfstring(L, "%f", creal(c));
+                }
+            }
+            return 1;
+
+        case COMPLEX_FLOAT_TYPE:
+            {
+                complex_float c = *(complex_float*) p;
+                if (cimagf(c) != 0) {
+                    lua_pushfstring(L, "%f+%fi", crealf(c), cimagf(c));
+                } else {
+                    lua_pushfstring(L, "%f", crealf(c));
+                }
+            }
+            return 1;
+
+        case FUNCTION_PTR_TYPE:
+            if (sizeof(cfunction) == sizeof(void*)) {
+                p = *(void**) p;
+            }
+            break;
         }
-
-    } else if (ct.pointers == 0 && ct.type == COMPLEX_FLOAT_TYPE) {
-        complex_float c = *(complex_float*) p;
-        if (cimagf(c) != 0) {
-            lua_pushfstring(L, "%f+%fi", crealf(c), cimagf(c));
-        } else {
-            lua_pushfstring(L, "%f", crealf(c));
-        }
-
-    } else {
-        push_type_name(L, -1, &ct);
-        lua_pushfstring(L, "cdata<%s>: %p", lua_tostring(L, -1), p);
     }
 
+    push_type_name(L, -1, &ct);
+    lua_pushfstring(L, "cdata<%s>: %p", lua_tostring(L, -1), p);
     return 1;
 }
 

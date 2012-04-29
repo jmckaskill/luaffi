@@ -235,6 +235,8 @@ static void put_back(struct parser* P)
 int64_t calculate_constant(lua_State* L, struct parser* P);
 
 static int g_name_key;
+static int g_front_name_key;
+static int g_back_name_key;
 
 #ifndef max
 #define max(a,b) ((a) < (b) ? (b) : (a))
@@ -1267,115 +1269,137 @@ int parse_type(lua_State* L, struct parser* P, struct ctype* ct)
     return 0;
 }
 
-static void append_type_name(luaL_Buffer* B, int usr, const struct ctype* ct)
+enum name_type {
+    BOTH,
+    FRONT,
+    BACK,
+};
+
+static void append_type_name(luaL_Buffer* B, int usr, const struct ctype* ct, enum name_type type)
 {
     size_t i;
     lua_State* L = B->L;
 
     usr = lua_absindex(L, usr);
 
-    if (ct->type != FUNCTION_PTR_TYPE && (ct->const_mask & (1 << ct->pointers))) {
-        luaL_addstring(B, "const ");
-    }
+    if (type == FRONT || type == BOTH) {
+        if (ct->type != FUNCTION_PTR_TYPE && (ct->const_mask & (1 << ct->pointers))) {
+            luaL_addstring(B, "const ");
+        }
 
-    switch (ct->type) {
-    case ENUM_TYPE:
-        luaL_addstring(B, "enum ");
-        goto get_name;
+        switch (ct->type) {
+        case ENUM_TYPE:
+            luaL_addstring(B, "enum ");
+            goto get_name;
 
-    case STRUCT_TYPE:
-        luaL_addstring(B, "struct ");
-        goto get_name;
+        case STRUCT_TYPE:
+            luaL_addstring(B, "struct ");
+            goto get_name;
 
-    case UNION_TYPE:
-        luaL_addstring(B, "union ");
-        goto get_name;
+        case UNION_TYPE:
+            luaL_addstring(B, "union ");
+            goto get_name;
 
-    case FUNCTION_TYPE:
-    case FUNCTION_PTR_TYPE:
-    get_name:
-        lua_pushlightuserdata(L, &g_name_key);
-        lua_rawget(L, usr);
-        luaL_addvalue(B);
-        break;
+        get_name:
+            lua_pushlightuserdata(L, &g_name_key);
+            lua_rawget(L, usr);
+            luaL_addvalue(B);
+            break;
 
-    case VOID_TYPE:
-        luaL_addstring(B, "void");
-        break;
-    case BOOL_TYPE:
-        luaL_addstring(B, "bool");
-        break;
-    case DOUBLE_TYPE:
-        luaL_addstring(B, "double");
-        break;
-    case LONG_DOUBLE_TYPE:
-        luaL_addstring(B, "long double");
-        break;
-    case FLOAT_TYPE:
-        luaL_addstring(B, "float");
-        break;
-    case COMPLEX_LONG_DOUBLE_TYPE:
-        luaL_addstring(B, "long complex double");
-        break;
-    case COMPLEX_DOUBLE_TYPE:
-        luaL_addstring(B, "complex double");
-        break;
-    case COMPLEX_FLOAT_TYPE:
-        luaL_addstring(B, "complex float");
-        break;
-    case INT8_TYPE:
-        luaL_addstring(B, "char");
-        break;
-    case UINT8_TYPE:
-        luaL_addstring(B, "unsigned char");
-        break;
-    case INT16_TYPE:
-        luaL_addstring(B, "short");
-        break;
-    case UINT16_TYPE:
-        luaL_addstring(B, "unsigned short");
-        break;
-    case INT32_TYPE:
-        luaL_addstring(B, "int");
-        break;
-    case UINT32_TYPE:
-        luaL_addstring(B, "unsigned int");
-        break;
-    case INT64_TYPE:
-        luaL_addstring(B, "int64_t");
-        break;
-    case UINT64_TYPE:
-        luaL_addstring(B, "uint64_t");
-        break;
+        case FUNCTION_TYPE:
+        case FUNCTION_PTR_TYPE:
+            lua_pushlightuserdata(L, &g_front_name_key);
+            lua_rawget(L, usr);
+            luaL_addvalue(B);
+            break;
 
-    case UINTPTR_TYPE:
-        if (sizeof(uintptr_t) == sizeof(uint32_t)) {
+        case VOID_TYPE:
+            luaL_addstring(B, "void");
+            break;
+        case BOOL_TYPE:
+            luaL_addstring(B, "bool");
+            break;
+        case DOUBLE_TYPE:
+            luaL_addstring(B, "double");
+            break;
+        case LONG_DOUBLE_TYPE:
+            luaL_addstring(B, "long double");
+            break;
+        case FLOAT_TYPE:
+            luaL_addstring(B, "float");
+            break;
+        case COMPLEX_LONG_DOUBLE_TYPE:
+            luaL_addstring(B, "long complex double");
+            break;
+        case COMPLEX_DOUBLE_TYPE:
+            luaL_addstring(B, "complex double");
+            break;
+        case COMPLEX_FLOAT_TYPE:
+            luaL_addstring(B, "complex float");
+            break;
+        case INT8_TYPE:
+            luaL_addstring(B, "char");
+            break;
+        case UINT8_TYPE:
+            luaL_addstring(B, "unsigned char");
+            break;
+        case INT16_TYPE:
+            luaL_addstring(B, "short");
+            break;
+        case UINT16_TYPE:
+            luaL_addstring(B, "unsigned short");
+            break;
+        case INT32_TYPE:
+            luaL_addstring(B, "int");
+            break;
+        case UINT32_TYPE:
             luaL_addstring(B, "unsigned int");
-        } else if (sizeof(uintptr_t) == sizeof(uint64_t)) {
+            break;
+        case INT64_TYPE:
+            luaL_addstring(B, "int64_t");
+            break;
+        case UINT64_TYPE:
             luaL_addstring(B, "uint64_t");
-        } else {
-            luaL_error(L, "internal error - bad type");
+            break;
+
+        case UINTPTR_TYPE:
+            if (sizeof(uintptr_t) == sizeof(uint32_t)) {
+                luaL_addstring(B, "unsigned int");
+            } else if (sizeof(uintptr_t) == sizeof(uint64_t)) {
+                luaL_addstring(B, "uint64_t");
+            } else {
+                luaL_error(L, "internal error - bad type");
+            }
+            break;
+
+        default:
+            luaL_error(L, "internal error - bad type %d", ct->type);
         }
-        break;
 
-    default:
-        luaL_error(L, "internal error - bad type %d", ct->type);
-    }
-
-    if (ct->type == FUNCTION_PTR_TYPE && (ct->const_mask & (1 << ct->pointers))) {
-        luaL_addstring(B, " const");
-    }
-
-    for (i = 0; i < ct->pointers - ct->is_array; i++) {
-        luaL_addchar(B, '*');
-        if (ct->const_mask & (1 << (ct->pointers - i - 1))) {
-            luaL_addstring(B, " const");
+        for (i = 0; i < ct->pointers - ct->is_array; i++) {
+            luaL_addchar(B, '*');
+            if (ct->const_mask & (1 << (ct->pointers - i - 1))) {
+                luaL_addstring(B, " const");
+            }
         }
     }
 
-    if (ct->is_array) {
-        lua_pushfstring(L, "[%d]", (int) ct->array_size);
-        luaL_addvalue(B);
+    if (type == BOTH || type == BACK) {
+        if (ct->is_array) {
+            lua_pushfstring(L, "[%d]", (int) ct->array_size);
+            luaL_addvalue(B);
+        }
+
+        if (ct->type == FUNCTION_PTR_TYPE || ct->type == FUNCTION_TYPE) {
+            lua_pushlightuserdata(L, &g_back_name_key);
+            lua_rawget(L, usr);
+            luaL_addvalue(B);
+        }
+
+        if (ct->is_bitfield) {
+            lua_pushfstring(L, " : %d", (int) ct->bit_size);
+            luaL_addvalue(B);
+        }
     }
 }
 
@@ -1384,40 +1408,55 @@ void push_type_name(lua_State* L, int usr, const struct ctype* ct)
     luaL_Buffer B;
     usr = lua_absindex(L, usr);
     luaL_buffinit(L, &B);
-    append_type_name(&B, usr, ct);
+    append_type_name(&B, usr, ct, BOTH);
     luaL_pushresult(&B);
 }
 
-static void push_function_type_string(lua_State* L, int usr, const struct ctype* ct)
+static void push_function_type_strings(lua_State* L, int usr, const struct ctype* ct)
 {
     size_t i, args;
     luaL_Buffer B;
     int top = lua_gettop(L);
+    const struct ctype* ret_ct;
+
+    int arg_ct = top+3;
+    int arg_usr = top+4;
+    int ret_usr = top+6;
+
     usr = lua_absindex(L, usr);
 
     /* return type */
+    lua_settop(L, top+4); /* room for two returns and two temp positions */
     lua_rawgeti(L, usr, 0);
     lua_getuservalue(L, -1);
+    ret_ct = (const struct ctype*) lua_touserdata(L, -2);
 
-    /* note push the arg and user value below the indexes used by the buffer
-     * and use indexes relative to top to avoid problems due to the buffer
-     * system pushing a variable number of arguments onto the stack */
     luaL_buffinit(L, &B);
-    append_type_name(&B, top+2, (const struct ctype*) lua_touserdata(L, top+1));
+    append_type_name(&B, ret_usr, ret_ct, FRONT);
+
+    if (ret_ct->type != FUNCTION_TYPE && ret_ct->type != FUNCTION_PTR_TYPE) {
+        luaL_addchar(&B, ' ');
+    }
 
     switch (ct->calling_convention) {
     case STD_CALL:
-        luaL_addstring(&B, " (__stdcall *)(");
+        luaL_addstring(&B, "(__stdcall *");
         break;
     case FAST_CALL:
-        luaL_addstring(&B, " (__fastcall *)(");
+        luaL_addstring(&B, "(__fastcall *");
         break;
     case C_CALL:
-        luaL_addstring(&B, " (*)(");
+        luaL_addstring(&B, "(*");
         break;
     default:
         luaL_error(L, "internal error - unknown calling convention");
     }
+
+    luaL_pushresult(&B);
+    lua_replace(L, top+1);
+
+    luaL_buffinit(L, &B);
+    luaL_addstring(&B, ")(");
 
     /* arguments */
     args = lua_rawlen(L, usr);
@@ -1426,135 +1465,88 @@ static void push_function_type_string(lua_State* L, int usr, const struct ctype*
             luaL_addstring(&B, ", ");
         }
 
+        /* note push the arg and user value below the indexes used by the buffer
+         * and use indexes relative to top to avoid problems due to the buffer
+         * system pushing a variable number of arguments onto the stack */
         lua_rawgeti(L, usr, (int) i);
-        lua_replace(L, top+1);
-        lua_getuservalue(L, top+1);
-        lua_replace(L, top+2);
-        append_type_name(&B, top+2, (const struct ctype*) lua_touserdata(L, top+1));
+        lua_replace(L, arg_ct);
+        lua_getuservalue(L, arg_ct);
+        lua_replace(L, arg_usr);
+        append_type_name(&B, arg_usr, (const struct ctype*) lua_touserdata(L, arg_ct), BOTH);
     }
 
     luaL_addstring(&B, ")");
+    append_type_name(&B, ret_usr, ret_ct, BACK);
     luaL_pushresult(&B);
+    lua_replace(L, top+2);
 
-    lua_remove(L, -2);
-    lua_remove(L, -2);
+    lua_settop(L, top+2);
+    assert(lua_isstring(L, top+1) && lua_isstring(L, top+2));
 }
 
-/* parses from after the opening paranthesis to after the closing parenthesis
- * leaves the ctype usrvalue on the top of the stack
- */
-static void parse_function_arguments(lua_State* L, struct parser* P, struct ctype* ftype, int ret_usr, struct ctype* ret_type)
+/* parses from after the opening paranthesis to after the closing parenthesis */
+static void parse_function_arguments(lua_State* L, struct parser* P, int ct_usr, struct ctype* ct)
 {
-    /* In this function the lua stack layout is:
-     * top+1: types upval
-     * top+2: function usr table
-     * top+3: argument ctype
-     * top+4: argument usr table
-     */
     struct token tok;
-    int arg_idx = 1;
+    int args = 0;
     int top = lua_gettop(L);
 
-    ret_usr = lua_absindex(L, ret_usr);
-
-    push_upval(L, &types_key);
-
-    /* user table for the function type, at the end we look up the type and if
-     * we find another usr table that matches exactly, we dump this one and
-     * use that instead
-     */
-    lua_newtable(L);
-
-    assert(lua_gettop(L) == top + 2); /* types and usr */
-
-    push_ctype(L, ret_usr, ret_type);
-    lua_rawseti(L, top+2, 0);
+    ct_usr = lua_absindex(L, ct_usr);
 
     for (;;) {
-        struct ctype arg_type;
-
-        lua_settop(L, top+2); /* types and usr */
-
         require_token(L, P, &tok);
 
         if (tok.type == TOK_CLOSE_PAREN) {
             break;
         }
 
-        if (arg_idx > 1) {
-            if (tok.type == TOK_COMMA) {
-                require_token(L, P, &tok);
-            } else {
-                luaL_error(L, "unexpected token in function argument %d on line %d", arg_idx, P->line);
+        if (args) {
+            if (tok.type != TOK_COMMA) {
+                luaL_error(L, "unexpected token in function argument %d on line %d", args, P->line);
             }
+
+            require_token(L, P, &tok);
         }
 
         if (tok.type == TOK_VA_ARG) {
-            ftype->has_var_arg = true;
-            check_token(L, P, TOK_CLOSE_PAREN, "", "unexpected token in function argument %d on line %d", arg_idx, P->line);
+            ct->has_var_arg = true;
+            check_token(L, P, TOK_CLOSE_PAREN, "", "unexpected token after ... in function on line %d", P->line);
             break;
 
         } else if (tok.type == TOK_TOKEN) {
+            struct ctype at;
+
             put_back(P);
+            parse_type(L, P, &at);
+            parse_argument(L, P, -1, &at, NULL, NULL);
 
-            parse_type(L, P, &arg_type);
-            assert(lua_gettop(L) == top+3);
-
-            parse_argument(L, P, -1, &arg_type, NULL, NULL);
-            assert(lua_gettop(L) == top+4);
+            assert(lua_gettop(L) == top + 2);
 
             /* array arguments are just treated as their base pointer type */
-            arg_type.is_array = 0;
+            at.is_array = 0;
 
             /* check for the c style int func(void) and error on other uses of arguments of type void */
-            if (arg_type.type == VOID_TYPE && arg_type.pointers == 0) {
-                if (arg_idx > 1) {
+            if (at.type == VOID_TYPE && at.pointers == 0) {
+                if (args) {
                     luaL_error(L, "can't have argument of type void on line %d", P->line);
                 }
 
-                check_token(L, P, TOK_CLOSE_PAREN, "", "unexpected token in function argument %d on line %d", arg_idx, P->line);
+                check_token(L, P, TOK_CLOSE_PAREN, "", "unexpected void in function on line %d", P->line);
+                lua_pop(L, 2);
                 break;
             }
 
-            assert(lua_gettop(L) == top+4); /* types, usr, arg type, arg usr */
+            push_ctype(L, -1, &at);
+            lua_rawseti(L, ct_usr, ++args);
 
-            push_ctype(L, -1, &arg_type);
-            lua_rawseti(L, top+2, arg_idx++);
+            lua_pop(L, 2); /* parse_type and parse_argument at_usr */
 
         } else {
-            luaL_error(L, "unexpected token in function argument %d on line %d", arg_idx, P->line);
+            luaL_error(L, "unexpected token in function argument %d on line %d", args+1, P->line);
         }
     }
 
-    lua_settop(L, top+2);
-
-    push_function_type_string(L, top+2, ftype);
-    assert(lua_gettop(L) == top+3);
-
-    /* top+1 is the types table
-     * top+2 is the usr table
-     * top+3 is the type string
-     */
-
-    lua_pushvalue(L, top+2);
-    lua_rawget(L, top+1);
-
-    if (lua_isnil(L, -1)) {
-        lua_pushvalue(L, top+3);
-        push_ctype(L, top+2, ftype);
-        lua_rawset(L, top+1); /* type[name] = function ctype */
-
-        lua_pushlightuserdata(L, &g_name_key);
-        lua_pushvalue(L, top+3);
-        lua_rawset(L, top+2); /* usr[name_key] = name */
-    } else {
-        /* use the usr value from the type table */
-        lua_replace(L, top+2);
-    }
-
-    lua_settop(L, top+2);
-    lua_remove(L, top+1);
-    assert(lua_istable(L, -1));
+    assert(lua_gettop(L) == top);
 }
 
 static int max_bitfield_size(int type)
@@ -1580,21 +1572,92 @@ static int max_bitfield_size(int type)
     }
 }
 
-/* parses after the main base type of a typedef, function argument or
- * struct/union member
- * eg for const void* bar[3] the base type is void with the subtype so far of
- * const, this parses the "* bar[3]" and updates the type argument
- *
- * ct_usr and type must be as filled out by parse_type
- *
- * pushes the updated user value on the top of the stack
+static struct ctype* parse_argument2(lua_State* L, struct parser* P, int ct_usr, struct ctype* ct, struct token* name, struct parser* asmname);
+
+/* parses from after the first ( in a function declaration or function pointer
+ * can be one of:
+ * void foo(...) before ...
+ * void (foo)(...) before foo
+ * void (* <>)(...) before <> which is the inner type
  */
-void parse_argument(lua_State* L, struct parser* P, int ct_usr, struct ctype* type, struct token* name, struct parser* asmname)
+static struct ctype* parse_function(lua_State* L, struct parser* P, int ct_usr, struct ctype* ct, struct token* name, struct parser* asmname)
+{
+    /* We have a function pointer or a function. The usr table will
+     * get replaced by the canonical one (if there is one) in
+     * find_canonical_usr after all the arguments and returns have
+     * been parsed. */
+    struct token tok;
+    int top = lua_gettop(L);
+    struct ctype* ret;
+
+    lua_newtable(L);
+    ret = push_ctype(L, ct_usr, ct);
+    lua_rawseti(L, -2, 0);
+    ct_usr = lua_gettop(L);
+
+    memset(ct, 0, sizeof(*ct));
+    ct->base_size = sizeof(void (*)());
+    ct->align_mask = min(FUNCTION_ALIGN_MASK, P->align_mask);
+    ct->type = FUNCTION_TYPE;
+    ct->is_defined = 1;
+
+    if (name->type == TOK_NIL) {
+        for (;;) {
+            require_token(L, P, &tok);
+
+            if (tok.type == TOK_STAR) {
+
+                if (ct->type == FUNCTION_TYPE) {
+                    ct->type = FUNCTION_PTR_TYPE;
+                } else if (ct->pointers == POINTER_MAX) {
+                    luaL_error(L, "maximum number of pointer derefs reached - use a struct to break up the pointers on line %d", P->line);
+                } else {
+                    ct->pointers++;
+                    ct->const_mask <<= 1;
+                }
+
+            } else if (parse_attribute(L, P, &tok, ct, asmname)) {
+                /* parse_attribute sets the appropriate fields */
+
+            } else {
+                /* call parse_argument to handle the inner contents
+                 * e.g. the <> in "void (* <>) (...)". Note that the
+                 * inner contents can itself be a function, a function
+                 * ptr, array, etc (e.g. "void (*signal(int sig, void
+                 * (*func)(int)))(int)" ).
+                 */
+                put_back(P);
+                ct = parse_argument2(L, P, ct_usr, ct, name, asmname);
+                break;
+            }
+        }
+
+        check_token(L, P, TOK_CLOSE_PAREN, NULL, "unexpected token in function on line %d", P->line);
+        check_token(L, P, TOK_OPEN_PAREN, NULL, "unexpected token in function on line %d", P->line);
+    }
+
+    parse_function_arguments(L, P, ct_usr, ct);
+
+    /* if we have an inner function then set the outer function ptr as its
+     * return type and return the inner function
+     * e.g. for void (* <signal(int, void (*)(int))> )(int) inner is
+     * surrounded by <>, return type is void (*)(int)
+     */
+    if (lua_gettop(L) == ct_usr+1) {
+        lua_replace(L, ct_usr);
+    }
+
+    assert(lua_gettop(L) == top + 1 && lua_istable(L, -1));
+    return ret;
+}
+
+static struct ctype* parse_argument2(lua_State* L, struct parser* P, int ct_usr, struct ctype* ct, struct token* name, struct parser* asmname)
 {
     struct token tok;
     int top = lua_gettop(L);
-    int have_name = 0;
+    int ft_usr = 0;
 
+    luaL_checkstack(L, 10, "function too complex");
     ct_usr = lua_absindex(L, ct_usr);
 
     for (;;) {
@@ -1603,133 +1666,57 @@ void parse_argument(lua_State* L, struct parser* P, int ct_usr, struct ctype* ty
             break;
 
         } else if (tok.type == TOK_STAR) {
-            if (type->pointers == POINTER_MAX) {
+            if (ct->pointers == POINTER_MAX) {
                 luaL_error(L, "maximum number of pointer derefs reached - use a struct to break up the pointers on line %d", P->line);
             }
 
-            type->pointers++;
-            type->const_mask <<= 1;
+            ct->pointers++;
+            ct->const_mask <<= 1;
 
             /* __declspec(align(#)) may come before the type in a member */
-            if (!type->is_packed) {
-                type->align_mask = max(min(PTR_ALIGN_MASK, P->align_mask), type->align_mask);
+            if (!ct->is_packed) {
+                ct->align_mask = max(min(PTR_ALIGN_MASK, P->align_mask), ct->align_mask);
             }
 
         } else if (tok.type == TOK_REFERENCE) {
             luaL_error(L, "NYI: c++ reference types");
 
-        } else if (parse_attribute(L, P, &tok, type, asmname)) {
+        } else if (parse_attribute(L, P, &tok, ct, asmname)) {
             /* parse attribute has filled out appropriate fields in type */
 
         } else if (tok.type == TOK_OPEN_PAREN) {
-            /* we have a function pointer or a function */
-
-            struct ctype ret_type = *type;
-
-            memset(type, 0, sizeof(*type));
-            type->base_size = sizeof(void (*)());
-            type->align_mask = min(FUNCTION_ALIGN_MASK, P->align_mask);
-            type->type = FUNCTION_TYPE;
-            type->calling_convention = ret_type.calling_convention;
-            type->is_defined = 1;
-
-            ret_type.calling_convention = C_CALL;
-
-            /* if we already have a name then this is a function declaration,
-             * if not then this is a function pointer or the function name is
-             * wrapped in parentheses */
-            if (!have_name) {
-                require_token(L, P, &tok);
-
-                for (;;) {
-                    if (tok.type == TOK_CLOSE_PAREN) {
-                        break;
-
-                    } else if (tok.type == TOK_STAR) {
-                        if (type->pointers == POINTER_MAX) {
-                            luaL_error(L, "maximum number of pointer derefs reached - use a struct to break up the pointers");
-                        }
-                        type->pointers++;
-                        type->const_mask <<= 1;
-
-                    } else if (parse_attribute(L, P, &tok, type, NULL)) {
-                        /* parse_attribute sets the appropriate fields */
-
-                    } else if (tok.type != TOK_TOKEN) {
-                        luaL_error(L, "unexpected token in function on line %d", P->line);
-
-                    } else if (IS_CONST(tok) || IS_VOLATILE(tok)) {
-                        /* ignored for now */
-
-                    } else {
-                        if (name) {
-                            *name = tok;
-                        }
-
-                        /* check that next is a close paran to ensure we've
-                         * got the right name and not some unknown attribute
-                         */
-                        check_token(L, P, TOK_CLOSE_PAREN, "", "unexpected token after name on line %d", P->line);
-                        break;
-                    }
-
-                    require_token(L, P, &tok);
-                }
-
-                if (type->pointers > 0) {
-                    type->pointers--;
-                    type->const_mask >>= 1;
-                    type->type = FUNCTION_PTR_TYPE;
-                }
-
-                check_token(L, P, TOK_OPEN_PAREN, "", "unexpected token in function on line %d", P->line);
-            }
-
-            parse_function_arguments(L, P, type, ct_usr, &ret_type);
-
-            /* Parse attributes after the arguments closing paren */
-            for (;;) {
-                if (!next_token(L, P, &tok)) {
-                    break;
-                }
-
-                if (!parse_attribute(L, P, &tok, type, asmname)) {
-                    put_back(P);
-                    break;
-                }
-            }
-
-            return;
+            ct = parse_function(L, P, ct_usr, ct, name, asmname);
+            ft_usr = lua_gettop(L);
 
         } else if (tok.type == TOK_OPEN_SQUARE) {
             /* array */
-            if (type->pointers == POINTER_MAX) {
+            if (ct->pointers == POINTER_MAX) {
                 luaL_error(L, "maximum number of pointer derefs reached - use a struct to break up the pointers");
             }
-            type->is_array = 1;
-            type->pointers++;
-            type->const_mask <<= 1;
+            ct->is_array = 1;
+            ct->pointers++;
+            ct->const_mask <<= 1;
             require_token(L, P, &tok);
 
-            if (type->pointers == 1 && !type->is_defined) {
+            if (ct->pointers == 1 && !ct->is_defined) {
                 luaL_error(L, "array of undefined type on line %d", P->line);
             }
 
-            if (type->is_variable_struct || type->is_variable_array) {
+            if (ct->is_variable_struct || ct->is_variable_array) {
                 luaL_error(L, "can't have an array of a variably sized type on line %d", P->line);
             }
 
             if (tok.type == TOK_QUESTION) {
-                type->is_variable_array = 1;
-                type->variable_increment = (type->pointers > 1) ? sizeof(void*) : type->base_size;
+                ct->is_variable_array = 1;
+                ct->variable_increment = (ct->pointers > 1) ? sizeof(void*) : ct->base_size;
                 check_token(L, P, TOK_CLOSE_SQUARE, "", "invalid character in array on line %d", P->line);
 
             } else if (tok.type == TOK_CLOSE_SQUARE) {
-                type->array_size = 0;
+                ct->array_size = 0;
 
-            } else if (tok.type == TOK_TOKEN && IS_LITERAL(tok, "__restrict")) {
+            } else if (tok.type == TOK_TOKEN && IS_RESTRICT(tok)) {
                 /* odd gcc extension foo[__restrict] for arguments */
-                type->array_size = 0;
+                ct->array_size = 0;
                 check_token(L, P, TOK_CLOSE_SQUARE, "", "invalid character in array on line %d", P->line);
 
             } else {
@@ -1739,20 +1726,19 @@ void parse_argument(lua_State* L, struct parser* P, int ct_usr, struct ctype* ty
                 if (asize < 0) {
                     luaL_error(L, "array size can not be negative on line %d", P->line);
                 }
-                type->array_size = (size_t) asize;
+                ct->array_size = (size_t) asize;
                 check_token(L, P, TOK_CLOSE_SQUARE, "", "invalid character in array on line %d", P->line);
             }
 
         } else if (tok.type == TOK_COLON) {
             int64_t bsize = calculate_constant(L, P);
 
-            if (type->pointers || bsize < 0 || bsize > max_bitfield_size(type->type)) {
+            if (ct->pointers || bsize < 0 || bsize > max_bitfield_size(ct->type)) {
                 luaL_error(L, "invalid bitfield on line %d", P->line);
             }
 
-            type->is_bitfield = 1;
-            type->bit_size = (size_t) bsize;
-            break;
+            ct->is_bitfield = 1;
+            ct->bit_size = (size_t) bsize;
 
         } else if (tok.type != TOK_TOKEN) {
             /* we've reached the end of the declaration */
@@ -1760,27 +1746,137 @@ void parse_argument(lua_State* L, struct parser* P, int ct_usr, struct ctype* ty
             break;
 
         } else if (IS_CONST(tok)) {
-            type->const_mask |= 1;
+            ct->const_mask |= 1;
 
         } else if (IS_VOLATILE(tok) || IS_RESTRICT(tok)) {
             /* ignored for now */
 
         } else {
-            if (name) {
-                *name = tok;
-            }
-
-            have_name = 1;
+            *name = tok;
         }
     }
 
-    if (type->type != FUNCTION_PTR_TYPE && type->calling_convention != C_CALL) {
-        /* functions use ftype and have already returned */
-        luaL_error(L, "calling convention annotation only allowed on functions and function pointers on line %d", P->line);
+    assert((ft_usr == 0 && lua_gettop(L) == top) || (lua_gettop(L) == top + 1 && ft_usr == top + 1 && (lua_istable(L, -1) || lua_isnil(L, -1))));
+    return ct;
+}
+
+static void find_canonical_usr(lua_State* L, int ct_usr, const struct ctype *ct)
+{
+    struct ctype rt;
+    int top = lua_gettop(L);
+    int types;
+
+    if (ct->type != FUNCTION_PTR_TYPE && ct->type != FUNCTION_TYPE) {
+        return;
     }
 
-    lua_pushvalue(L, ct_usr);
-    assert(lua_gettop(L) == top + 1 && (lua_istable(L, -1) || lua_isnil(L, -1)));
+    luaL_checkstack(L, 10, "function too complex");
+    ct_usr = lua_absindex(L, ct_usr);
+
+    /* check to see if we already have the canonical usr table */
+    lua_pushlightuserdata(L, &g_name_key);
+    lua_rawget(L, ct_usr);
+    if (!lua_isnil(L, -1)) {
+        lua_pop(L, 1);
+        assert(top == lua_gettop(L));
+        return;
+    }
+    lua_pop(L, 1);
+
+    assert(top == lua_gettop(L));
+
+    /* first canonize the return type */
+    lua_rawgeti(L, ct_usr, 0);
+    rt = *(struct ctype*) lua_touserdata(L, -1);
+    lua_getuservalue(L, -1);
+    find_canonical_usr(L, -1, &rt);
+    push_ctype(L, -1, &rt);
+    lua_rawseti(L, ct_usr, 0);
+    lua_pop(L, 2); /* return ctype and usr */
+
+    assert(top == lua_gettop(L));
+
+    /* look up the type string in the types table */
+    push_upval(L, &types_key);
+    types = lua_gettop(L);
+
+    push_function_type_strings(L, ct_usr, ct);
+    lua_pushvalue(L, -2);
+    lua_pushvalue(L, -2);
+    lua_concat(L, 2);
+
+    lua_pushvalue(L, -1);
+    lua_rawget(L, types);
+
+    assert(lua_gettop(L) == types + 4 && types == top + 1);
+    /* stack: types, front, back, both, looked up value */
+
+    if (lua_isnil(L, -1)) {
+        lua_pop(L, 1);
+
+        lua_pushlightuserdata(L, &g_front_name_key);
+        lua_pushvalue(L, -4);
+        lua_rawset(L, ct_usr);
+
+        lua_pushlightuserdata(L, &g_back_name_key);
+        lua_pushvalue(L, -3);
+        lua_rawset(L, ct_usr);
+
+        lua_pushlightuserdata(L, &g_name_key);
+        lua_pushvalue(L, -2);
+        lua_rawset(L, ct_usr);
+
+        lua_pushvalue(L, -1);
+        push_ctype(L, ct_usr, ct);
+        lua_rawset(L, types);
+    } else {
+        lua_getuservalue(L, -1);
+        lua_replace(L, ct_usr);
+        lua_pop(L, 1);
+    }
+
+    lua_pop(L, 4);
+    assert(top == lua_gettop(L) && types == top + 1);
+}
+
+
+/* parses after the main base type of a typedef, function argument or
+ * struct/union member
+ * eg for const void* bar[3] the base type is void with the subtype so far of
+ * const, this parses the "* bar[3]" and updates the type argument
+ *
+ * ct_usr and type must be as filled out by parse_type
+ *
+ * pushes the updated user value on the top of the stack
+ */
+void parse_argument(lua_State* L, struct parser* P, int ct_usr, struct ctype* ct, struct token* pname, struct parser* asmname)
+{
+    struct token tok, name;
+    int top = lua_gettop(L);
+
+    memset(&name, 0, sizeof(name));
+    parse_argument2(L, P, ct_usr, ct, &name, asmname);
+
+    for (;;) {
+        if (!next_token(L, P, &tok)) {
+            break;
+        } else if (parse_attribute(L, P, &tok, ct, asmname)) {
+            /* parse_attribute sets the appropriate fields */
+        } else {
+            put_back(P);
+            break;
+        }
+    }
+
+    if (lua_gettop(L) == top) {
+        lua_pushvalue(L, ct_usr);
+    }
+
+    find_canonical_usr(L, -1, ct);
+
+    if (pname) {
+        *pname = name;
+    }
 }
 
 static void parse_typedef(lua_State* L, struct parser* P)

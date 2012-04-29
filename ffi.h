@@ -392,7 +392,7 @@ static float cimagf(complex_float c) {
 #define CALLBACK_FUNC_USR_IDX 1
 
 void set_defined(lua_State* L, int ct_usr, struct ctype* ct);
-void push_ctype(lua_State* L, int ct_usr, const struct ctype* ct);
+struct ctype* push_ctype(lua_State* L, int ct_usr, const struct ctype* ct);
 void* push_cdata(lua_State* L, int ct_usr, const struct ctype* ct); /* called from asm */
 void push_callback(lua_State* L, cfunction f);
 void check_ctype(lua_State* L, int idx, struct ctype* ct);

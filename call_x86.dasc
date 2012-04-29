@@ -1459,7 +1459,7 @@ void compile_function(lua_State* L, cfunction func, int ct_usr, const struct cty
             | get_errno
             | call_rrp extern push_cdata, L_ARG, lua_upvalueindex(num_upvals), mbr_ct
             | mov rcx, [rsp+32]
-            | mov [rax], rax // *(cfunction**) cdata = val
+            | mov [rax], rcx // *(cfunction**) cdata = val
             | jmp ->lua_return_arg
             break;
 
