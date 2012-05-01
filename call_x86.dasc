@@ -781,10 +781,11 @@ cfunction compile_callback(lua_State* L, int fidx, int ct_usr, const struct ctyp
             case DOUBLE_TYPE:
                 lua_pop(L, 1);
                 get_float(Dst, ct, &reg, mt->type == DOUBLE_TYPE);
-                /* for 64bit xmm0 is already set */
                 |.if X64WIN
+                | movq xmm1, xmm0
                 | mov rcx, L_ARG
                 |.elif X64
+                | // for 64bit xmm0 is already set
                 | mov rdi, L_ARG
                 |.else
                 | fstp qword [rsp+4]
