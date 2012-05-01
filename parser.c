@@ -1738,7 +1738,7 @@ static struct ctype* parse_argument2(lua_State* L, struct parser* P, int ct_usr,
             }
 
             ct->is_bitfield = 1;
-            ct->bit_size = (size_t) bsize;
+            ct->bit_size = (unsigned) bsize;
 
         } else if (tok.type != TOK_TOKEN) {
             /* we've reached the end of the declaration */

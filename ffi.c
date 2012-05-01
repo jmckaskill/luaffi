@@ -688,9 +688,9 @@ err:
 /* pops the member key from the stack, leaves the member user value on the
  * stack. Returns the member offset. Returns -ve if the member can not be
  * found. */
-static int get_member(lua_State* L, int usr, const struct ctype* ct, struct ctype* mt)
+static ptrdiff_t get_member(lua_State* L, int usr, const struct ctype* ct, struct ctype* mt)
 {
-    int off;
+    ptrdiff_t off;
     lua_rawget(L, usr);
 
     if (lua_isnil(L, -1)) {
@@ -743,7 +743,7 @@ static void set_struct(lua_State* L, int idx, void* to, int to_usr, const struct
         memset(to, 0, ctype_size(L, tt));
         lua_pushnil(L);
         while (lua_next(L, idx)) {
-            int off;
+            ptrdiff_t off;
 
             if (!have_first && lua_tonumber(L, -2) == 1 && lua_tonumber(L, -1) != 0) {
                 have_first = 1;
@@ -763,7 +763,7 @@ static void set_struct(lua_State* L, int idx, void* to, int to_usr, const struct
         /* if we only had a single non zero value then initialize all members to that value */
         if (!have_other && have_first && tt->type != UNION_TYPE) {
             size_t i, sz;
-            int off;
+            ptrdiff_t off;
             lua_rawgeti(L, idx, 1);
             sz = lua_rawlen(L, to_usr);
 
@@ -1058,7 +1058,7 @@ static int ffi_alignof(lua_State* L)
 
 static int ffi_offsetof(lua_State* L)
 {
-    int off;
+    ptrdiff_t off;
     struct ctype ct, mt;
     lua_settop(L, 2);
     check_ctype(L, 1, &ct);
@@ -1301,10 +1301,10 @@ static int ffi_gc(lua_State* L)
 /* lookup_cdata_index returns the offset of the found type and user value on
  * the stack if valid. Otherwise returns -ve and doesn't touch the stack.
  */
-static int lookup_cdata_index(lua_State* L, int idx, int ct_usr, struct ctype* ct)
+static ptrdiff_t lookup_cdata_index(lua_State* L, int idx, int ct_usr, struct ctype* ct)
 {
     struct ctype mt;
-    int off;
+    ptrdiff_t off;
 
     ct_usr = lua_absindex(L, ct_usr);
 
@@ -1322,7 +1322,7 @@ static int lookup_cdata_index(lua_State* L, int idx, int ct_usr, struct ctype* c
 
         lua_pushvalue(L, ct_usr);
 
-        return (ct->pointers ? sizeof(void*) : ct->base_size) * (size_t) lua_tonumber(L, 2);
+        return (ct->pointers ? sizeof(void*) : ct->base_size) * lua_tonumber(L, 2);
 
     case LUA_TSTRING:
         /* possibilities are struct/union, pointer to struct/union */
@@ -1349,7 +1349,7 @@ static int cdata_newindex(lua_State* L)
 {
     struct ctype tt;
     char* to;
-    int off;
+    ptrdiff_t off;
 
     lua_settop(L, 3);
 
@@ -1391,7 +1391,7 @@ static int cdata_index(lua_State* L)
     void* to;
     struct ctype ct;
     char* data;
-    int off;
+    ptrdiff_t off;
 
     lua_settop(L, 2);
     data = (char*) check_cdata(L, 1, &ct);
