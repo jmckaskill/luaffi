@@ -286,6 +286,7 @@ void compile_globals(struct jit* jit, lua_State* L)
     | jmp ->lua_return_arg
 
     |->lua_return_bool:
+    | movzx eax, al
     | mov [rsp+32], eax
     | get_errno
     | mov eax, [rsp+32]
@@ -791,6 +792,7 @@ cfunction compile_callback(lua_State* L, int fidx, int ct_usr, const struct ctyp
             case BOOL_TYPE:
                 lua_pop(L, 1);
                 get_int(Dst, ct, &reg, 0);
+                | movzx ecx, cl
                 | call_rr extern lua_pushboolean, L_ARG, rcx
                 break;
 
