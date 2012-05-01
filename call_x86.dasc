@@ -316,32 +316,39 @@ void compile_globals(struct jit* jit, lua_State* L)
     | call_rp extern luaL_error, L_ARG, &"too many arguments"
 
     |->save_registers:
+    | // use rbp relative so we store values in the outer stack frame
     |.if X64WIN
-    | // use the provided shadow space for int registers
-    | mov [rbp+8], rcx
-    | mov [rbp+16], rdx
-    | mov [rbp+24], r8
-    | mov [rbp+32], r9
+    | // use the provided shadow space for int registers above prev rbp and
+    | // return address
+    | mov [rbp+16], rcx
+    | mov [rbp+24], rdx
+    | mov [rbp+32], r8
+    | mov [rbp+40], r9
     | // use the extra space we added for float registers
-    | movq qword [rbp-24], xmm0
-    | movq qword [rbp-32], xmm1
-    | movq qword [rbp-40], xmm2
-    | movq qword [rbp-48], xmm3
+    | // -16 to store underneath r12
+    | movq qword [rbp-16], xmm0
+    | movq qword [rbp-24], xmm1
+    | movq qword [rbp-32], xmm2
+    | movq qword [rbp-40], xmm3
     |.elif X64
-    | movq qword [rbp-24], xmm0
-    | movq qword [rbp-32], xmm1
-    | movq qword [rbp-40], xmm2
-    | movq qword [rbp-48], xmm3
-    | movq qword [rbp-56], xmm4
-    | movq qword [rbp-64], xmm5
-    | movq qword [rbp-72], xmm6
-    | movq qword [rbp-80], xmm7
-    | mov [rbp-88], rdi
-    | mov [rbp-96], rsi
-    | mov [rbp-104], rdx
-    | mov [rbp-112], rcx
-    | mov [rbp-120], r8
-    | mov [rbp-128], r9
+    | movq qword [rbp-16], xmm0
+    | movq qword [rbp-24], xmm1
+    | movq qword [rbp-32], xmm2
+    | movq qword [rbp-40], xmm3
+    | movq qword [rbp-48], xmm4
+    | movq qword [rbp-56], xmm5
+    | movq qword [rbp-64], xmm6
+    | movq qword [rbp-72], xmm7
+    | mov [rbp-80], rdi
+    | mov [rbp-88], rsi
+    | mov [rbp-96], rdx
+    | mov [rbp-104], rcx
+    | mov [rbp-112], r8
+    | mov [rbp-120], r9
+    |.else
+    | // fastcall
+    | mov [rbp-4], ecx
+    | mov [rbp-8], edx
     |.endif
     | ret
 
@@ -432,7 +439,7 @@ struct reg_alloc {
     int floats;
     int ints;
 #endif
-    size_t off;
+    int off;
 };
 
 #ifdef _WIN64
@@ -462,12 +469,12 @@ static void get_int(Dst_DECL, const struct ctype* ct, struct reg_alloc* reg, int
     }
 #elif __amd64__
     if (reg->ints < MAX_INT_REGISTERS(ct)) {
-        | mov rcx, [rbp - 88 - 8*reg->ints]
+        | mov rcx, [rbp - 80 - 8*reg->ints]
         reg->ints++;
     }
 #else
-    if (!is_int64 && reg->ints < MAX_INT_REGISTERS(ct) && ct->calling_convention == FAST_CALL) {
-        | mov ecx, [rbp - 12 - 4*reg->ints]
+    if (!is_int64 && reg->ints < MAX_INT_REGISTERS(ct)) {
+        | mov ecx, [rbp - 4 - 4*reg->ints]
         reg->ints++;
     }
 #endif
@@ -534,12 +541,12 @@ static void get_float(Dst_DECL, const struct ctype* ct, struct reg_alloc* reg, i
 
 #ifdef _WIN64
     if (reg->regs < MAX_REGISTERS(ct)) {
-        off = -24 - 8*reg->regs;
+        off = -16 - 8*reg->regs;
         reg->regs++;
     }
 #else
     if (reg->floats < MAX_FLOAT_REGISTERS(ct)) {
-        off = -24 - 8*reg->floats;
+        off = -16 - 8*reg->floats;
         reg->floats++;
     }
 #endif
@@ -658,16 +665,13 @@ cfunction compile_callback(lua_State* L, int fidx, int ct_usr, const struct ctyp
     | // stack is 4 or 8 (mod 16) (L_ARG, rbp, rip)
     |.if X64
     | // 8 to realign, 16 for return vars, 32 for local calls, rest to save registers
-    | sub rsp, 56 + REGISTER_STACK_SPACE(ct)
+    | sub rsp, 8 + 16 + 32 + REGISTER_STACK_SPACE(ct)
     | call ->save_registers
     |.else
     | // 4 to realign, 16 for return vars, 32 for local calls, rest to save registers
-    | sub rsp, 52 + REGISTER_STACK_SPACE(ct)
-    // Copy fastcall args over to the stack so that the rest of the code
-    // doesn't care about the calling convention.
+    | sub rsp, 4 + 16 + 32 + REGISTER_STACK_SPACE(ct)
     if (ct->calling_convention == FAST_CALL) {
-        | mov [rbp-12], ecx
-        | mov [rbp-16], edx
+        | call ->save_registers
     }
     |.endif
 
