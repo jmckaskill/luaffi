@@ -325,7 +325,7 @@ void compile_globals(struct jit* jit, lua_State* L)
     | mov [rbp+32], r8
     | mov [rbp+40], r9
     | // use the extra space we added for float registers
-    | // -16 to store underneath r12
+    | // -16 to store underneath previous value of L_ARG
     | movq qword [rbp-16], xmm0
     | movq qword [rbp-24], xmm1
     | movq qword [rbp-32], xmm2
@@ -346,9 +346,9 @@ void compile_globals(struct jit* jit, lua_State* L)
     | mov [rbp-112], r8
     | mov [rbp-120], r9
     |.else
-    | // fastcall
-    | mov [rbp-4], ecx
-    | mov [rbp-8], edx
+    | // fastcall, -8 to store underneath previous value of L_ARG
+    | mov [rbp-8], ecx
+    | mov [rbp-12], edx
     |.endif
     | ret
 
@@ -447,7 +447,7 @@ struct reg_alloc {
 #elif defined __amd64__
 #define REGISTER_STACK_SPACE(ct) (14*8)
 #else
-#define REGISTER_STACK_SPACE(ct) ((ct)->calling_convention == FAST_CALL ? 2*4 : 0)
+#define REGISTER_STACK_SPACE(ct) ALIGN_UP(((ct)->calling_convention == FAST_CALL ? 2*4 : 0), 15)
 #endif
 
 /* Fastcall:
@@ -474,7 +474,7 @@ static void get_int(Dst_DECL, const struct ctype* ct, struct reg_alloc* reg, int
     }
 #else
     if (!is_int64 && reg->ints < MAX_INT_REGISTERS(ct)) {
-        | mov ecx, [rbp - 4 - 4*reg->ints]
+        | mov ecx, [rbp - 8 - 4*reg->ints]
         reg->ints++;
     }
 #endif
