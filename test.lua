@@ -448,6 +448,22 @@ for convention,c in pairs(dlls) do
                 checkalign(type, v2, c['print_align_attr_' .. align .. '_' .. suffix](buf, v2))
             end
         end
+
+        if not c.is_msvc then
+            if first then
+                local h = [[
+                struct align_attr_def_SUFFIX {
+                    char pad;
+                    TYPE v __attribute__(aligned);
+                };
+                int print_align_attr_def_SUFFIX(char* buf, struct align_attr_def_SUFFIX* p);
+                ]]
+                ffi.cdef(h:gsub('SUFFIX', suffix):gsub('TYPE', type))
+            end
+
+            local v = ffi.new('struct align_attr_def_' .. suffix, {0, test})
+            checkalign(type, v, c['print_align_attr_def_' .. suffix](buf, v))
+        end
     end
 
     local psz = ffi.new('size_t[1]')

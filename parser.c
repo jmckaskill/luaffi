@@ -1019,29 +1019,41 @@ static int parse_attribute(lua_State* L, struct parser* P, struct token* tok, st
                 /* ignore unknown symbols within parentheses */
 
             } else if (IS_LITERAL(*tok, "align") || IS_LITERAL(*tok, "aligned") || IS_LITERAL(*tok, "__aligned__")) {
-                check_token(L, P, TOK_OPEN_PAREN, NULL, "expected align(#) on line %d", P->line);
-
+                unsigned align = 0;
                 require_token(L, P, tok);
-                if (tok->type != TOK_NUMBER) {
+
+                switch (tok->type) {
+                case TOK_CLOSE_PAREN:
+                    align = ALIGNED_DEFAULT;
+                    put_back(P);
+                    break;
+
+                case TOK_OPEN_PAREN:
+                    require_token(L, P, tok);
+
+                    if (tok->type != TOK_NUMBER) {
+                        luaL_error(L, "expected align(#) on line %d", P->line);
+                    }
+
+                    switch (tok->integer) {
+                    case 1: align = 0; break;
+                    case 2: align = 1; break;
+                    case 4: align = 3; break;
+                    case 8: align = 7; break;
+                    case 16: align = 15; break;
+                    default:
+                        luaL_error(L, "unsupported align size on line %d", P->line);
+                    }
+
+                    check_token(L, P, TOK_CLOSE_PAREN, NULL, "expected align(#) on line %d", P->line);
+                    break;
+
+                default:
                     luaL_error(L, "expected align(#) on line %d", P->line);
                 }
 
-                /* __attribute__(aligned(#)) is only supposed to increase alignment
-                 */
-
-                if (tok->integer > ct->align_mask + 1) {
-                    switch (tok->integer) {
-                    case 1: ct->align_mask = 0; break;
-                    case 2: ct->align_mask = 1; break;
-                    case 4: ct->align_mask = 3; break;
-                    case 8: ct->align_mask = 7; break;
-                    case 16: ct->align_mask = 15; break;
-                    default:
-                        return luaL_error(L, "unsupported align size on line %d", P->line);
-                    }
-                }
-
-                check_token(L, P, TOK_CLOSE_PAREN, NULL, "expected align(#) on line %d", P->line);
+                /* __attribute__(aligned(#)) is only supposed to increase alignment */
+                ct->align_mask = max(align, ct->align_mask);
 
             } else if (IS_LITERAL(*tok, "packed") || IS_LITERAL(*tok, "__packed__")) {
                 ct->align_mask = 0;

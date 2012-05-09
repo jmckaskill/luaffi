@@ -230,6 +230,15 @@ struct jit {
 #define FUNCTION_ALIGN_MASK (sizeof(void (*)()) - 1)
 #define DEFAULT_ALIGN_MASK 7
 
+#ifdef OS_OSX
+/* TODO: figure out why the alignof trick doesn't work on OS X */
+#define ALIGNED_DEFAULT 7
+#elif defined __GNUC__
+#define ALIGNED_DEFAULT (__alignof__(void* __attribute__((aligned))) - 1)
+#else
+#define ALIGNED_DEFAULT PTR_ALIGN_MASK
+#endif
+
 extern int jit_key;
 extern int ctype_mt_key;
 extern int cdata_mt_key;

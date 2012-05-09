@@ -228,11 +228,17 @@ ALIGN_NO_ATTR(16)
 #define ATTR8(TYPE) ATTR_(TYPE, 8)
 #define ATTR16(TYPE) ATTR_(TYPE, 16)
 
+#define ATTR_DEF(TYPE) TYPE v __attribute__((aligned))
+
 ALIGN2(attr_1, ATTR1)
 ALIGN2(attr_2, ATTR2)
 ALIGN2(attr_4, ATTR4)
 ALIGN2(attr_8, ATTR8)
 ALIGN2(attr_16, ATTR16)
+
+#ifndef _MSC_VER
+ALIGN2(attr_def, ATTR_DEF)
+#endif
 
 #ifdef _MSC_VER
 #define alignof(type) __alignof(type)
