@@ -483,7 +483,7 @@ static int copy_submembers(lua_State* L, int to_usr, int from_usr, const struct 
 
     /* integer keys */
     sublen = (int) lua_rawlen(L, from_usr);
-    for (i = 0; i < sublen; i++) {
+    for (i = 1; i <= sublen; i++) {
         lua_rawgeti(L, from_usr, i);
 
         ct = *(const struct ctype*) lua_touserdata(L, -1);

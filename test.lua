@@ -620,10 +620,19 @@ struct vls {
         } c;
     } d;
 };
+struct vls2 {
+    char pad;
+    union {
+        uint8_t a;
+        uint16_t b;
+    };
+};
 ]]
 
 assert(ffi.sizeof('struct vls', 3) == 5)
 assert(ffi.sizeof(ffi.new('struct vls', 4).d.c) == 5)
+assert(ffi.offsetof('struct vls2', 'a') == 2)
+assert(ffi.sizeof('struct vls2') == 4)
 
 ffi.cdef [[ static const int DUMMY = 8 << 2; ]]
 assert(ffi.C.DUMMY == 32)
