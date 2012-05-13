@@ -350,6 +350,10 @@ for convention,c in pairs(dlls) do
         types.dc = nil
         types.fc = nil
     end
+    check((3+4*i).re, 3)
+    check((3+4*i).im, 4)
+    check(ffi.new('complex float', 2+8*i).re, 2)
+    check(ffi.new('complex float', 5+6*i).im, 6)
 
     check(c.have_complex(), c.have_complex2())
     check(c.is_msvc, c.is_msvc2)

@@ -1397,13 +1397,33 @@ static int cdata_index(lua_State* L)
     data = (char*) check_cdata(L, 1, &ct);
     assert(lua_gettop(L) == 3);
 
-    /* Callbacks use the same metatable as standard cdata values, but have set
-     * and free members. So instead of mt.__index = mt, we do the equiv here. */
-    if (!ct.pointers && ct.type == FUNCTION_PTR_TYPE) {
-        lua_getmetatable(L, 1);
-        lua_pushvalue(L, 2);
-        lua_rawget(L, -2);
-        return 1;
+    if (!ct.pointers) {
+        switch (ct.type) {
+        case FUNCTION_PTR_TYPE:
+            /* Callbacks use the same metatable as standard cdata values, but have set
+             * and free members. So instead of mt.__index = mt, we do the equiv here. */
+            lua_getmetatable(L, 1);
+            lua_pushvalue(L, 2);
+            lua_rawget(L, -2);
+            return 1;
+
+            /* This provides the .re and .im virtual members */
+        case COMPLEX_DOUBLE_TYPE:
+        case COMPLEX_FLOAT_TYPE:
+            if (!lua_isstring(L, 2)) {
+                luaL_error(L, "invalid member for complex number");
+
+            } else if (strcmp(lua_tostring(L, 2), "re") == 0) {
+                lua_pushnumber(L, ct.type == COMPLEX_DOUBLE_TYPE ? creal(*(complex_double*) data) : crealf(*(complex_float*) data));
+
+            } else if (strcmp(lua_tostring(L, 2), "im") == 0) {
+                lua_pushnumber(L, ct.type == COMPLEX_DOUBLE_TYPE ? cimag(*(complex_double*) data) : cimagf(*(complex_float*) data));
+
+            } else {
+                luaL_error(L, "invalid member for complex number");
+            }
+            return 1;
+        }
     }
 
     off = lookup_cdata_index(L, 2, -1, &ct);
