@@ -19,3 +19,6 @@ call_*.h
 *.vcproj
 /luaffi
 /test_includes/
+*.swp
+*.dylib
+/tmp
