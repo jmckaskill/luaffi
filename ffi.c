@@ -104,8 +104,6 @@ static int64_t check_intptr(lua_State* L, int idx, void* p, struct ctype* ct)
 
     } else if (ct->pointers) {
         return (intptr_t) p;
-    } else if (ct->type == UINTPTR_TYPE || ct->type == FUNCTION_PTR_TYPE) {
-        return *(intptr_t*) p;
     }
 
     switch (ct->type) {
@@ -444,6 +442,12 @@ static void* check_pointer(lua_State* L, int idx, struct ctype* ct)
         lua_pushnil(L);
         return NULL;
 
+    case LUA_TNUMBER:
+        ct->type = UINTPTR_TYPE;
+        ct->pointers = 0;
+        lua_pushnil(L);
+        return (void*) (uintptr_t) lua_tonumber(L, idx);
+
     case LUA_TLIGHTUSERDATA:
         ct->type = VOID_TYPE;
         lua_pushnil(L);
@@ -464,12 +468,10 @@ static void* check_pointer(lua_State* L, int idx, struct ctype* ct)
             /* some other type of user data */
             ct->type = VOID_TYPE;
             return lua_touserdata(L, idx);
-        } else if (ct->pointers || ct->type == STRUCT_TYPE || ct->type == UNION_TYPE) {
+        } else if (ct->type == STRUCT_TYPE || ct->type == UNION_TYPE) {
             return p;
-        } else if (ct->type == FUNCTION_PTR_TYPE) {
-            return (void*) *(cfunction*) p;
-        } else if (ct->type == UINTPTR_TYPE) {
-            return *(void**) p;
+        } else {
+            return (void*) check_intptr(L, idx, p, ct);
         }
         break;
     }

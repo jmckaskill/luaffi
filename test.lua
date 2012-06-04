@@ -788,5 +788,7 @@ assert(ffi.new('int[3]', {1})[0] == 1)
 assert(ffi.new('int[3]', 1, 2)[1] == 2)
 assert(ffi.new('int[3]', {1, 2})[1] == 2)
 
+ffi.cast('char*', 1)
+
 print('Test PASSED')
 
