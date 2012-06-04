@@ -1023,13 +1023,22 @@ static void get_variable_array_size(lua_State* L, int idx, struct ctype* ct)
     }
 }
 
+static int try_set_value(lua_State* L)
+{
+    void* p = lua_touserdata(L, 2);
+    struct ctype* ct = (struct ctype*) lua_touserdata(L, 4);
+    int check_ptrs = lua_toboolean(L, 5);
+    set_value(L, 1, p, 3, ct, check_ptrs);
+    return 0;
+}
+
 static int do_new(lua_State* L, int is_cast)
 {
+    int cargs, i;
     void* p;
     struct ctype ct;
     int check_ptrs = !is_cast;
 
-    setmintop(L, 3);
     check_ctype(L, 1, &ct);
 
     /* don't push a callback when we have a c function, as cb:set needs a
@@ -1046,6 +1055,7 @@ static int do_new(lua_State* L, int is_cast)
         return 1;
     }
 
+    /* this removes the vararg argument if its needed, and errors if its invalid */
     if (!is_cast) {
         get_variable_array_size(L, 2, &ct);
     }
@@ -1065,9 +1075,49 @@ static int do_new(lua_State* L, int is_cast)
         lua_pop(L, 2); /* user_mt and gc_upval */
     }
 
-    if (!lua_isnil(L, 2)) {
-        set_value(L, 2, p, -2, &ct, check_ptrs);
+    /* stack is:
+     * ctype arg
+     * ctor args ... 0+
+     * ctype usr
+     * cdata
+     */
+
+    cargs = lua_gettop(L) - 3;
+
+    if (cargs == 0) {
+        return 1;
     }
+
+    if (cargs == 1) {
+        /* try packed form first
+         * packed: ffi.new('int[3]', {1})
+         * unpacked: ffi.new('int[3]', 1)
+         */
+        lua_pushcfunction(L, &try_set_value);
+        lua_pushvalue(L, 2); /* ctor arg */
+        lua_pushlightuserdata(L, p);
+        lua_pushvalue(L, -5); /* ctype usr */
+        lua_pushlightuserdata(L, &ct);
+        lua_pushboolean(L, check_ptrs);
+
+        if (!lua_pcall(L, 5, 0, 0)) {
+            return 1;
+        }
+
+        /* remove any errors */
+        lua_settop(L, 4);
+    }
+
+    /* if we have more than 2 ctor arguments then they must be unpacked, e.g.
+     * ffi.new('int[3]', 1, 2, 3) */
+    lua_createtable(L, cargs, 0);
+    lua_replace(L, 1);
+    for (i = 1; i <= cargs; i++) {
+        lua_pushvalue(L, i + 1);
+        lua_rawseti(L, 1, i);
+    }
+    assert(lua_gettop(L) == cargs + 3);
+    set_value(L, 1, p, -2, &ct, check_ptrs);
 
     return 1;
 }

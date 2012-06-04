@@ -782,5 +782,11 @@ ffi.cast('long', ffi.C.NULL)
 ffi.cast('int8_t', ffi.C.NULL)
 assert(not pcall(function() ffi.new('long', ffi.C.NULL) end))
 
+-- ffi.new and ffi.cast allow unpacked struct/arrays
+assert(ffi.new('int[3]', 1)[0] == 1)
+assert(ffi.new('int[3]', {1})[0] == 1)
+assert(ffi.new('int[3]', 1, 2)[1] == 2)
+assert(ffi.new('int[3]', {1, 2})[1] == 2)
+
 print('Test PASSED')
 
