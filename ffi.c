@@ -2301,9 +2301,9 @@ static int ffi_number(lua_State* L)
         /* call the old _G.tonumber, we use an upvalue as _G.tonumber is set
          * to this function */
         lua_pushvalue(L, lua_upvalueindex(1));
-        lua_pushvalue(L, 1);
-        lua_call(L, 1, LUA_MULTRET);
-        return 1;
+        lua_insert(L, 1);
+        lua_call(L, lua_gettop(L)-1, LUA_MULTRET);
+        return lua_gettop(L);
     }
 }
 

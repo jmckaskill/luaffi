@@ -772,5 +772,8 @@ assert(ffi.istype('int[3]', ffi.new('const int[3]')))
 -- a function pointer. Type of &signal.
 check(tostring(ffi.typeof('void (*foo(int, void(*)(int)))(int)')):match('%b<>'), '<void (*(*)(int, void (*)(int)))(int)>')
 
+-- Make sure we pass all arguments to tonumber
+check(tonumber('FE', 16), 0xFE)
+
 print('Test PASSED')
 
