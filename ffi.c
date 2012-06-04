@@ -2205,7 +2205,16 @@ static int cdata_tostring(lua_State* L)
 {
     struct ctype ct;
     char buf[64];
-    void* p = check_cdata(L, 1, &ct);
+    void* p;
+    int ret;
+
+    lua_settop(L, 1);
+    p = to_cdata(L, 1, &ct);
+
+    ret = call_user_op(L, "__tostring", 1, 2, &ct);
+    if (ret >= 0) {
+        return ret;
+    }
 
     if (ct.pointers == 0) {
         switch (ct.type) {

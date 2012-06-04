@@ -685,6 +685,7 @@ mt.__call = function(vls, a, b) return '__call', vls.d.a .. a .. (b or 'nil')  e
 mt.__unm = function(vls) return -vls.d.a end
 mt.__concat = function(vls, a) return vls.d.a .. a end
 mt.__len = function(vls) return vls.d.a end
+mt.__tostring = function(vls) return 'string ' .. vls.d.a end
 
 vls.d.a = 5
 check(vls + 5, 10)
@@ -706,6 +707,7 @@ check(-vls, -5)
 local a,b = vls('6')
 check(a, '__call')
 check(b, '56nil')
+check(tostring(vls), 'string 5')
 
 if _VERSION ~= 'Lua 5.1' then
     check(vls .. 'str', '5str')
