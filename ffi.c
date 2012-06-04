@@ -206,17 +206,23 @@ static int64_t check_intptr(lua_State* L, int idx, void* p, struct ctype* ct)
         type_error(L, idx, #TYPE, 0, NULL);                                 \
     }                                                                       \
 
+static int64_t cast_int64(lua_State* L, int idx, int is_cast)
+{ TO_NUMBER(int64_t, is_cast); (void) imag; return real; }
+
+static uint64_t cast_uint64(lua_State* L, int idx, int is_cast)
+{ TO_NUMBER(uint64_t, is_cast); (void) imag; return real; }
+
 int32_t check_int32(lua_State* L, int idx)
-{ return (int32_t) check_int64(L, idx); }
+{ return (int32_t) cast_int64(L, idx, 0); }
 
 uint32_t check_uint32(lua_State* L, int idx)
-{ return (uint32_t) check_uint64(L, idx); }
+{ return (uint32_t) cast_uint64(L, idx, 0); }
 
 int64_t check_int64(lua_State* L, int idx)
-{ TO_NUMBER(int64_t, 0); (void) imag; return real; }
+{ return cast_int64(L, idx, 0); }
 
 uint64_t check_uint64(lua_State* L, int idx)
-{ TO_NUMBER(uint64_t, 0); (void) imag; return real; }
+{ return cast_uint64(L, idx, 0); }
 
 static void do_check_double(lua_State* L, int idx, double* preal, double* pimag)
 {
@@ -916,31 +922,31 @@ static void set_value(lua_State* L, int idx, void* to, int to_usr, const struct 
 
         switch (tt->type) {
         case BOOL_TYPE:
-            *(_Bool*) to = (check_int32(L, idx) != 0);
+            *(_Bool*) to = (cast_int64(L, idx, !check_pointers) != 0);
             break;
         case UINT8_TYPE:
-            *(uint8_t*) to = (uint8_t) check_uint32(L, idx);
+            *(uint8_t*) to = (uint8_t) cast_uint64(L, idx, !check_pointers);
             break;
         case INT8_TYPE:
-            *(int8_t*) to = (int8_t) check_int32(L, idx);
+            *(int8_t*) to = (int8_t) cast_int64(L, idx, !check_pointers);
             break;
         case UINT16_TYPE:
-            *(uint16_t*) to = (uint16_t) check_uint32(L, idx);
+            *(uint16_t*) to = (uint16_t) cast_uint64(L, idx, !check_pointers);
             break;
         case INT16_TYPE:
-            *(int16_t*) to = (int16_t) check_int32(L, idx);
+            *(int16_t*) to = (int16_t) cast_int64(L, idx, !check_pointers);
             break;
         case UINT32_TYPE:
-            *(uint32_t*) to = check_uint32(L, idx);
+            *(uint32_t*) to = (uint32_t) cast_uint64(L, idx, !check_pointers);
             break;
         case INT32_TYPE:
-            *(int32_t*) to = check_int32(L, idx);
+            *(int32_t*) to = (int32_t) cast_int64(L, idx, !check_pointers);
             break;
         case UINT64_TYPE:
-            *(uint64_t*) to = check_uint64(L, idx);
+            *(uint64_t*) to = cast_uint64(L, idx, !check_pointers);
             break;
         case INT64_TYPE:
-            *(int64_t*) to = check_int64(L, idx);
+            *(int64_t*) to = cast_int64(L, idx, !check_pointers);
             break;
         case FLOAT_TYPE:
             *(float*) to = (float) check_double(L, idx);

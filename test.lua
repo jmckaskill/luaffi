@@ -777,5 +777,10 @@ check(tostring(ffi.typeof('void (*foo(int, void(*)(int)))(int)')):match('%b<>'),
 -- Make sure we pass all arguments to tonumber
 check(tonumber('FE', 16), 0xFE)
 
+-- Allow casts from pointer to numeric types
+ffi.cast('long', ffi.C.NULL)
+ffi.cast('int8_t', ffi.C.NULL)
+assert(not pcall(function() ffi.new('long', ffi.C.NULL) end))
+
 print('Test PASSED')
 
