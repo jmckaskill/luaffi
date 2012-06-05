@@ -289,11 +289,7 @@ enum {
     INT16_TYPE,
     INT32_TYPE,
     INT64_TYPE,
-    UINT8_TYPE,
-    UINT16_TYPE,
-    UINT32_TYPE,
-    UINT64_TYPE,
-    UINTPTR_TYPE,
+    INTPTR_TYPE,
     ENUM_TYPE,
     UNION_TYPE,
     STRUCT_TYPE,
@@ -301,9 +297,7 @@ enum {
     FUNCTION_PTR_TYPE,
 };
 
-#define CHAR_TYPE ((((char) -1) > 0) ? UINT8_TYPE : INT8_TYPE)
-
-#define IS_CHAR(type) ((type) == INT8_TYPE || (type) == UINT8_TYPE)
+#define IS_CHAR_UNSIGNED (((char) -1) > 0)
 #define IS_COMPLEX(type) ((type) == COMPLEX_FLOAT_TYPE || (type) == COMPLEX_DOUBLE_TYPE)
 
 #define POINTER_BITS 2
@@ -356,6 +350,7 @@ struct ctype {
     unsigned has_bitfield : 1;
     unsigned is_jitted : 1;
     unsigned is_packed : 1;
+    unsigned is_unsigned : 1;
 };
 
 #ifdef _MSC_VER

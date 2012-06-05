@@ -1060,8 +1060,6 @@ static int parse_attribute(lua_State* L, struct parser* P, struct token* tok, st
                 ct->is_packed = 1;
 
             } else if (IS_LITERAL(*tok, "mode") || IS_LITERAL(*tok, "__mode__")) {
-                int is_unsigned = 0;
-                int is_float = 0;
 
                 check_token(L, P, TOK_OPEN_PAREN, NULL, "expected mode(MODE) on line %d", P->line);
 
@@ -1070,30 +1068,7 @@ static int parse_attribute(lua_State* L, struct parser* P, struct token* tok, st
                     luaL_error(L, "expected mode(MODE) on line %d", P->line);
                 }
 
-                switch (ct->type) {
-                case INT8_TYPE:
-                case INT16_TYPE:
-                case INT32_TYPE:
-                case INT64_TYPE:
-                    break;
-
-                case UINT8_TYPE:
-                case UINT16_TYPE:
-                case UINT32_TYPE:
-                case UINT64_TYPE:
-                    is_unsigned = 1;
-                    break;
-
-                case FLOAT_TYPE:
-                case DOUBLE_TYPE:
-                    is_float = 1;
-                    break;
-
-                default:
-                    luaL_error(L, "unexpected base type for mode attribute on line %d", P->line);
-                }
-
-                if (is_float) {
+                if (ct->type == FLOAT_TYPE || ct->type == DOUBLE_TYPE) {
                     struct {char ch; float v;} af;
                     struct {char ch; double v;} ad;
 
@@ -1119,12 +1094,12 @@ static int parse_attribute(lua_State* L, struct parser* P, struct token* tok, st
                     if (IS_LITERAL(*tok, "QI") || IS_LITERAL(*tok, "__QI__")
                             || IS_LITERAL(*tok, "byte") || IS_LITERAL(*tok, "__byte__")
                             ) {
-                        ct->type = is_unsigned ? UINT8_TYPE : INT8_TYPE;
+                        ct->type = INT8_TYPE;
                         ct->base_size = sizeof(uint8_t);
                         ct->align_mask = 0;
 
                     } else if (IS_LITERAL(*tok, "HI") || IS_LITERAL(*tok, "__HI__")) {
-                        ct->type = is_unsigned ? UINT16_TYPE : INT16_TYPE;
+                        ct->type = INT16_TYPE;
                         ct->base_size = sizeof(uint16_t);
                         ct->align_mask = ALIGNOF(a16);
 
@@ -1134,7 +1109,7 @@ static int parse_attribute(lua_State* L, struct parser* P, struct token* tok, st
                             || IS_LITERAL(*tok, "pointer") || IS_LITERAL(*tok, "__pointer__")
 #endif
                             ) {
-                        ct->type = is_unsigned ? UINT32_TYPE : INT32_TYPE;
+                        ct->type = INT32_TYPE;
                         ct->base_size = sizeof(uint32_t);
                         ct->align_mask = ALIGNOF(a32);
 
@@ -1144,7 +1119,7 @@ static int parse_attribute(lua_State* L, struct parser* P, struct token* tok, st
                             || IS_LITERAL(*tok, "pointer") || IS_LITERAL(*tok, "__pointer__")
 #endif
                             ) {
-                        ct->type = is_unsigned ? UINT64_TYPE : INT64_TYPE;
+                        ct->type = INT64_TYPE;
                         ct->base_size = sizeof(uint64_t);
                         ct->align_mask = ALIGNOF(a64);
 
@@ -1299,6 +1274,10 @@ static void append_type_name(luaL_Buffer* B, int usr, const struct ctype* ct, en
             luaL_addstring(B, "const ");
         }
 
+        if (ct->is_unsigned) {
+            luaL_addstring(B, "unsigned ");
+        }
+
         switch (ct->type) {
         case ENUM_TYPE:
             luaL_addstring(B, "enum ");
@@ -1352,33 +1331,21 @@ static void append_type_name(luaL_Buffer* B, int usr, const struct ctype* ct, en
         case INT8_TYPE:
             luaL_addstring(B, "char");
             break;
-        case UINT8_TYPE:
-            luaL_addstring(B, "unsigned char");
-            break;
         case INT16_TYPE:
             luaL_addstring(B, "short");
-            break;
-        case UINT16_TYPE:
-            luaL_addstring(B, "unsigned short");
             break;
         case INT32_TYPE:
             luaL_addstring(B, "int");
             break;
-        case UINT32_TYPE:
-            luaL_addstring(B, "unsigned int");
-            break;
         case INT64_TYPE:
-            luaL_addstring(B, "int64_t");
-            break;
-        case UINT64_TYPE:
-            luaL_addstring(B, "uint64_t");
+            luaL_addstring(B, "long long");
             break;
 
-        case UINTPTR_TYPE:
-            if (sizeof(uintptr_t) == sizeof(uint32_t)) {
-                luaL_addstring(B, "unsigned int");
-            } else if (sizeof(uintptr_t) == sizeof(uint64_t)) {
-                luaL_addstring(B, "uint64_t");
+        case INTPTR_TYPE:
+            if (sizeof(intptr_t) == sizeof(int32_t)) {
+                luaL_addstring(B, "long");
+            } else if (sizeof(intptr_t) == sizeof(int64_t)) {
+                luaL_addstring(B, "long long");
             } else {
                 luaL_error(L, "internal error - bad type");
             }
@@ -1573,17 +1540,13 @@ static int max_bitfield_size(int type)
     case BOOL_TYPE:
         return 1;
     case INT8_TYPE:
-    case UINT8_TYPE:
         return 8;
     case INT16_TYPE:
-    case UINT16_TYPE:
         return 16;
     case INT32_TYPE:
-    case UINT32_TYPE:
     case ENUM_TYPE:
         return 32;
     case INT64_TYPE:
-    case UINT64_TYPE:
         return 64;
     default:
         return -1;

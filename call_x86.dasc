@@ -373,15 +373,14 @@ int x86_return_size(lua_State* L, int usr, const struct ctype* ct)
                 switch (mt->type) {
                 case DOUBLE_TYPE:
                 case COMPLEX_FLOAT_TYPE:
-                case UINT64_TYPE:
                 case INT64_TYPE:
                     ret += 8;
                     break;
                 case COMPLEX_DOUBLE_TYPE:
                     ret += 16;
                     break;
-                case UINTPTR_TYPE:
-                    ret += sizeof(void*);
+                case INTPTR_TYPE:
+                    ret += sizeof(intptr_t);
                     break;
                 case FUNCTION_PTR_TYPE:
                     ret += sizeof(cfunction);
@@ -389,11 +388,8 @@ int x86_return_size(lua_State* L, int usr, const struct ctype* ct)
                 case BOOL_TYPE:
                 case FLOAT_TYPE:
                 case INT8_TYPE:
-                case UINT8_TYPE:
                 case INT16_TYPE:
-                case UINT16_TYPE:
                 case INT32_TYPE:
-                case UINT32_TYPE:
                 case ENUM_TYPE:
                     ret += 4;
                     break;
@@ -718,7 +714,6 @@ cfunction compile_callback(lua_State* L, int fidx, int ct_usr, const struct ctyp
         } else {
             switch (mt->type) {
             case INT64_TYPE:
-            case UINT64_TYPE:
                 lua_getuservalue(L, -1);
                 lua_rawseti(L, -3, ++num_upvals); /* mt */
                 lua_pop(L, 1);
@@ -732,7 +727,7 @@ cfunction compile_callback(lua_State* L, int fidx, int ct_usr, const struct ctyp
                 |.endif
                 break;
 
-            case UINTPTR_TYPE:
+            case INTPTR_TYPE:
                 lua_getuservalue(L, -1);
                 lua_rawseti(L, -3, ++num_upvals); /* mt */
                 lua_pop(L, 1);
@@ -804,42 +799,34 @@ cfunction compile_callback(lua_State* L, int fidx, int ct_usr, const struct ctyp
             case INT8_TYPE:
                 lua_pop(L, 1);
                 get_int(Dst, ct, &reg, 0);
-                | movsx ecx, cl
+                if (mt->is_unsigned) {
+                    | movzx ecx, cl
+                } else {
+                    | movsx ecx, cl
+                }
                 | call_rr extern push_int, L_ARG, rcx
-                break;
-
-            case UINT8_TYPE:
-                lua_pop(L, 1);
-                get_int(Dst, ct, &reg, 0);
-                | movzx ecx, cl
-                | call_rr extern push_uint, L_ARG, rcx
                 break;
 
             case INT16_TYPE:
                 lua_pop(L, 1);
                 get_int(Dst, ct, &reg, 0);
-                | movsx ecx, cx
+                if (mt->is_unsigned) {
+                    | movzx ecx, cx
+                } else {
+                    | movsx ecx, cx
+                }
                 | call_rr extern push_int, L_ARG, rcx
-                break;
-
-            case UINT16_TYPE:
-                lua_pop(L, 1);
-                get_int(Dst, ct, &reg, 0);
-                | movzx ecx, cx
-                | call_rr extern push_uint, L_ARG, rcx
                 break;
 
             case ENUM_TYPE:
             case INT32_TYPE:
                 lua_pop(L, 1);
                 get_int(Dst, ct, &reg, 0);
-                | call_rr extern push_int, L_ARG, rcx
-                break;
-
-            case UINT32_TYPE:
-                lua_pop(L, 1);
-                get_int(Dst, ct, &reg, 0);
-                | call_rr extern push_uint, L_ARG, rcx
+                if (mt->is_unsigned) {
+                    | call_rr extern push_uint, L_ARG, rcx
+                } else {
+                    | call_rr extern push_int, L_ARG, rcx
+                }
                 break;
 
             default:
@@ -889,32 +876,25 @@ cfunction compile_callback(lua_State* L, int fidx, int ct_usr, const struct ctyp
         case INT16_TYPE:
         case INT32_TYPE:
             lua_pop(L, 1);
-            | call_rr extern check_int32, L_ARG, -1
-            | mov [rsp+32], eax
-            | call_rr extern lua_settop, L_ARG, -3
-            | mov eax, [rsp+32]
-            break;
-
-        case UINT8_TYPE:
-        case UINT16_TYPE:
-        case UINT32_TYPE:
-            lua_pop(L, 1);
-            | call_rr extern check_uint32, L_ARG, -1
+            if (mt->is_unsigned) {
+                | call_rr extern check_uint32, L_ARG, -1
+            } else {
+                | call_rr extern check_int32, L_ARG, -1
+            }
             | mov [rsp+32], eax
             | call_rr extern lua_settop, L_ARG, -3
             | mov eax, [rsp+32]
             break;
 
         case INT64_TYPE:
-            | call_rr extern check_int64, L_ARG, -1
-            goto ret64;
-
-        case UINT64_TYPE:
-            | call_rr extern check_uint64, L_ARG, -1
-            goto ret64;
-
-        ret64:
             lua_pop(L, 1);
+
+            if (mt->is_unsigned) {
+                | call_rr extern check_uint64, L_ARG, -1
+            } else {
+                | call_rr extern check_int64, L_ARG, -1
+            }
+
             |.if X64
             | mov [rsp+32], rax
             |.else
@@ -930,7 +910,7 @@ cfunction compile_callback(lua_State* L, int fidx, int ct_usr, const struct ctyp
             |.endif
             break;
 
-        case UINTPTR_TYPE:
+        case INTPTR_TYPE:
             lua_pop(L, 1);
             | call_rr extern check_uintptr, L_ARG, -1
             | mov [rsp+32], rax
@@ -1136,28 +1116,22 @@ void compile_function(lua_State* L, cfunction func, int ct_usr, const struct cty
 
             case INT8_TYPE:
                 | call_rr extern check_int32, L_ARG, i
-                | movsx eax, al
-                add_int(Dst, ct, &reg, 0);
-                lua_pop(L, 1);
-                break;
-
-            case UINT8_TYPE:
-                | call_rr extern check_uint32, L_ARG, i
-                | movzx eax, al
+                if (mbr_ct->is_unsigned) {
+                    | movzx eax, al
+                } else {
+                    | movsx eax, al
+                }
                 add_int(Dst, ct, &reg, 0);
                 lua_pop(L, 1);
                 break;
 
             case INT16_TYPE:
                 | call_rr extern check_int32, L_ARG, i
-                | movsx eax, ax
-                add_int(Dst, ct, &reg, 0);
-                lua_pop(L, 1);
-                break;
-
-            case UINT16_TYPE:
-                | call_rr extern check_uint32, L_ARG, i
-                | movzx eax, ax
+                if (mbr_ct->is_unsigned) {
+                    | movzx eax, ax
+                } else {
+                    | movsx eax, ax
+                }
                 add_int(Dst, ct, &reg, 0);
                 lua_pop(L, 1);
                 break;
@@ -1172,31 +1146,27 @@ void compile_function(lua_State* L, cfunction func, int ct_usr, const struct cty
                 break;
 
             case INT32_TYPE:
-                | call_rr extern check_int32, L_ARG, i
+                if (mbr_ct->is_unsigned) {
+                    | call_rr extern check_uint32, L_ARG, i
+                } else {
+                    | call_rr extern check_int32, L_ARG, i
+                }
                 add_int(Dst, ct, &reg, 0);
                 lua_pop(L, 1);
                 break;
 
-            case UINT32_TYPE:
-                | call_rr extern check_uint32, L_ARG, i
-                add_int(Dst, ct, &reg, 0);
-                lua_pop(L, 1);
-                break;
-
-            case UINTPTR_TYPE:
+            case INTPTR_TYPE:
                 | call_rr extern check_uintptr, L_ARG, i
                 add_pointer(Dst, ct, &reg);
                 lua_pop(L, 1);
                 break;
 
             case INT64_TYPE:
-                | call_rr extern check_int64, L_ARG, i
-                add_int(Dst, ct, &reg, 1);
-                lua_pop(L, 1);
-                break;
-
-            case UINT64_TYPE:
-                | call_rr extern check_uint64, L_ARG, i
+                if (mbr_ct->is_unsigned) {
+                    | call_rr extern check_uint64, L_ARG, i
+                } else {
+                    | call_rr extern check_int64, L_ARG, i
+                }
                 add_int(Dst, ct, &reg, 1);
                 lua_pop(L, 1);
                 break;
@@ -1447,7 +1417,7 @@ void compile_function(lua_State* L, cfunction func, int ct_usr, const struct cty
     lua_rawgeti(L, ct_usr, 0);
     mbr_ct = (const struct ctype*) lua_touserdata(L, -1);
 
-    if (mbr_ct->pointers || mbr_ct->type == UINTPTR_TYPE) {
+    if (mbr_ct->pointers || mbr_ct->type == INTPTR_TYPE) {
         lua_getuservalue(L, -1);
         num_upvals += 2;
         | mov [rsp+32], rax // save the pointer
@@ -1471,7 +1441,6 @@ void compile_function(lua_State* L, cfunction func, int ct_usr, const struct cty
             break;
 
         case INT64_TYPE:
-        case UINT64_TYPE:
             num_upvals++;
             | // save the return value
             |.if X64
@@ -1567,37 +1536,32 @@ void compile_function(lua_State* L, cfunction func, int ct_usr, const struct cty
 
         case INT8_TYPE:
             lua_pop(L, 1);
-            | movsx eax, al
+            if (mbr_ct->is_unsigned) {
+                | movzx eax, al
+            } else {
+                | movsx eax, al
+            }
             | jmp ->lua_return_int
             break;
 
         case INT16_TYPE:
             lua_pop(L, 1);
-            | movsx eax, ax
-            | jmp ->lua_return_int
-            break;
-
-        case UINT8_TYPE:
-            lua_pop(L, 1);
-            | movzx eax, al
-            | jmp ->lua_return_int
-            break;
-
-        case UINT16_TYPE:
-            lua_pop(L, 1);
-            | movzx eax, ax
+            if (mbr_ct->is_unsigned) {
+                | movzx eax, ax
+            } else {
+                | movsx eax, ax
+            }
             | jmp ->lua_return_int
             break;
 
         case INT32_TYPE:
         case ENUM_TYPE:
             lua_pop(L, 1);
-            | jmp ->lua_return_int
-            break;
-
-        case UINT32_TYPE:
-            lua_pop(L, 1);
-            | jmp ->lua_return_uint
+            if (mbr_ct->is_unsigned) {
+                | jmp ->lua_return_uint
+            } else {
+                | jmp ->lua_return_int
+            }
             break;
 
         case FLOAT_TYPE:

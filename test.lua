@@ -807,5 +807,11 @@ ffi.cast('char*', 1)
 -- 2 arg form of ffi.copy
 ffi.copy(d, 'bar')
 
+-- unsigned should be ignored for pointer rules
+ffi.cdef[[
+int strncmp(const signed char *s1, const unsigned char *s2, size_t n);
+]]
+assert(ffi.C.strncmp("two", "three", 3) ~= 0)
+
 print('Test PASSED')
 
