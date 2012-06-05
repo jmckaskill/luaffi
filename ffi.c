@@ -2445,9 +2445,13 @@ static int ffi_copy(lua_State* L)
 static int ffi_fill(lua_State* L)
 {
     struct ctype ct;
-    void* to = check_pointer(L, 1, &ct);
-    size_t sz = (size_t) luaL_checknumber(L, 2);
+    void* to;
+    size_t sz;
     int val = 0;
+
+    setmintop(L, 3);
+    to = check_pointer(L, 1, &ct);
+    sz = (size_t) luaL_checknumber(L, 2);
 
     if (!lua_isnoneornil(L, 3)) {
         val = (int) luaL_checkinteger(L, 3);

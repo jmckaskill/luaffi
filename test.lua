@@ -813,5 +813,10 @@ int strncmp(const signed char *s1, const unsigned char *s2, size_t n);
 ]]
 assert(ffi.C.strncmp("two", "three", 3) ~= 0)
 
+ffi.fill(d, 3, 1)
+assert(d[2] == 1)
+ffi.fill(d, 3)
+assert(d[2] == 0)
+
 print('Test PASSED')
 
