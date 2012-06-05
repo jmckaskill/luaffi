@@ -2444,8 +2444,11 @@ static int ffi_string(lua_State* L)
 static int ffi_copy(lua_State* L)
 {
     struct ctype ft, tt;
-    char* to = (char*) check_pointer(L, 1, &tt);
-    char* from = (char*) check_pointer(L, 2, &ft);
+    char *to, *from;
+
+    setmintop(L, 3);
+    to = (char*) check_pointer(L, 1, &tt);
+    from = (char*) check_pointer(L, 2, &ft);
 
     if (!lua_isnoneornil(L, 3)) {
         memcpy(to, from, (size_t) luaL_checknumber(L, 3));

@@ -804,5 +804,8 @@ assert(d[1] == string.byte('a'))
 
 ffi.cast('char*', 1)
 
+-- 2 arg form of ffi.copy
+ffi.copy(d, 'bar')
+
 print('Test PASSED')
 
