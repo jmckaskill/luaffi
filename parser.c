@@ -1397,7 +1397,13 @@ static void append_type_name(luaL_Buffer* B, int usr, const struct ctype* ct, en
     }
 
     if (type == BOTH || type == BACK) {
-        if (ct->is_array) {
+        if (ct->is_reference) {
+            luaL_addstring(B, "(&)");
+        }
+
+        if (ct->is_variable_array && !ct->variable_size_known) {
+            luaL_addstring(B, "[?]");
+        } else if (ct->is_array) {
             lua_pushfstring(L, "[%d]", (int) ct->array_size);
             luaL_addvalue(B);
         }

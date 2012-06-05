@@ -788,6 +788,20 @@ assert(ffi.new('int[3]', {1})[0] == 1)
 assert(ffi.new('int[3]', 1, 2)[1] == 2)
 assert(ffi.new('int[3]', {1, 2})[1] == 2)
 
+ffi.cdef[[
+struct var {
+    char ch[?];
+};
+]]
+local d = ffi.new('char[4]')
+local v = ffi.cast('struct var*', d)
+v.ch = {1,2,3,4}
+assert(v.ch[3] == 4)
+v.ch = "bar"
+assert(v.ch[3] == 0)
+assert(v.ch[2] == string.byte('r'))
+assert(d[1] == string.byte('a'))
+
 ffi.cast('char*', 1)
 
 print('Test PASSED')

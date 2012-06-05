@@ -668,8 +668,6 @@ static void set_array(lua_State* L, int idx, void* to, int to_usr, const struct 
     size_t i, sz, esz;
     struct ctype et;
 
-    assert(!tt->is_variable_array);
-
     idx = lua_absindex(L, idx);
     to_usr = lua_absindex(L, to_usr);
 
@@ -678,7 +676,7 @@ static void set_array(lua_State* L, int idx, void* to, int to_usr, const struct 
         if (tt->pointers == 1 && IS_CHAR(tt->type)) {
             const char* str = lua_tolstring(L, idx, &sz);
 
-            if (sz >= tt->array_size) {
+            if (!tt->is_variable_array && sz >= tt->array_size) {
                 memcpy(to, str, tt->array_size);
             } else {
                 /* include nul terminator */
@@ -698,18 +696,31 @@ static void set_array(lua_State* L, int idx, void* to, int to_usr, const struct 
 
         lua_rawgeti(L, idx, 2);
 
-        if (lua_isnil(L, -1)) {
+        if (tt->is_variable_array) {
+            /* we have no idea how big the array is, so set values based off
+             * how many items were given to us */
+            lua_pop(L, 1);
+            for (i = 0; i < lua_rawlen(L, idx); i++) {
+                lua_rawgeti(L, idx, (int) i + 1);
+                set_value(L, -1, (char*) to + esz * i, to_usr, &et, check_pointers);
+                lua_pop(L, 1);
+            }
+
+        } else if (lua_isnil(L, -1)) {
             /* there is no second element, so we set the whole array to the
              * first element (or nil - ie 0) if there is no first element) */
             lua_pop(L, 1);
             lua_rawgeti(L, idx, 1);
+
             if (lua_isnil(L, -1)) {
                 memset(to, 0, ctype_size(L, tt));
             } else {
+                /* if its still variable we have no idea how many values to set */
                 for (i = 0; i < tt->array_size; i++) {
                     set_value(L, -1, (char*) to + esz * i, to_usr, &et, check_pointers);
                 }
             }
+
             lua_pop(L, 1);
 
         } else {
@@ -761,16 +772,16 @@ static ptrdiff_t get_member(lua_State* L, int usr, const struct ctype* ct, struc
     lua_getuservalue(L, -1);
     lua_replace(L, -2);
 
-    if (mt->is_variable_array) {
+    if (mt->is_variable_array && ct->variable_size_known) {
         /* eg char mbr[?] */
         size_t sz = (mt->pointers > 1) ? sizeof(void*) : mt->base_size;
-        assert(ct->is_variable_struct && ct->variable_size_known && mt->is_array);
+        assert(ct->is_variable_struct && mt->is_array);
         mt->array_size = ct->variable_increment / sz;
         mt->is_variable_array = 0;
 
-    } else if (mt->is_variable_struct) {
+    } else if (mt->is_variable_struct && ct->variable_size_known) {
         /* eg struct {char a; char b[?]} mbr; */
-        assert(ct->is_variable_struct && ct->variable_size_known);
+        assert(ct->is_variable_struct);
         mt->variable_size_known = 1;
         mt->variable_increment = ct->variable_increment;
     }
@@ -786,8 +797,6 @@ static void set_struct(lua_State* L, int idx, void* to, int to_usr, const struct
     int have_other = 0;
     struct ctype mt;
     void* p;
-
-    assert(!tt->is_variable_struct || tt->variable_size_known);
 
     to_usr = lua_absindex(L, to_usr);
     idx = lua_absindex(L, idx);
@@ -1571,7 +1580,6 @@ err:
 
     if (ct.is_array) {
         /* push a reference to the array */
-        assert(!ct.is_variable_array);
         ct.is_reference = 1;
         to = push_cdata(L, -1, &ct);
         *(void**) to = data;
@@ -2418,7 +2426,7 @@ static int ffi_string(lua_State* L)
         if (!lua_isnil(L, 2)) {
             sz = (size_t) luaL_checknumber(L, 2);
 
-        } else if (ct.is_array) {
+        } else if (ct.is_array && !ct.is_variable_array) {
             char* nul = memchr(data, '\0', ct.array_size);
             sz = nul ? nul - data : ct.array_size;
 
