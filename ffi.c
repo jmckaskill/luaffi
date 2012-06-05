@@ -5,6 +5,9 @@
 #include <math.h>
 #include <inttypes.h>
 
+/* Set to 1 to get extra debugging on print */
+#define DEBUG_TOSTRING 0
+
 int jit_key;
 int ctype_mt_key;
 int cdata_mt_key;
@@ -2239,6 +2242,42 @@ static const char* etype_tostring(int type)
     }
 }
 
+static void print_type(lua_State* L, const struct ctype* ct)
+{
+    lua_pushfstring(L, " sz %d %d %d align %d ptr %d %d %d type %s %d %d %d name %d call %d %d var %d %d %d bit %d %d %d %d jit %d",
+            /* sz */
+            ct->base_size,
+            ct->array_size,
+            ct->offset,
+            /* align */
+            ct->align_mask,
+            /* ptr */
+            ct->is_array,
+            ct->pointers,
+            ct->const_mask,
+            /* type */
+            etype_tostring(ct->type),
+            ct->is_reference,
+            ct->is_defined,
+            ct->is_null,
+            /* name */
+            ct->has_member_name,
+            /* call */
+            ct->calling_convention,
+            ct->has_var_arg,
+            /* var */
+            ct->is_variable_array,
+            ct->is_variable_struct,
+            ct->variable_size_known,
+            /* bit */
+            ct->is_bitfield,
+            ct->has_bitfield,
+            ct->bit_offset,
+            ct->bit_size,
+            /* jit */
+            ct->is_jitted);
+}
+
 static int ctype_tostring(lua_State* L)
 {
     struct ctype ct;
@@ -2247,45 +2286,12 @@ static int ctype_tostring(lua_State* L)
     check_ctype(L, 1, &ct);
     assert(lua_gettop(L) == 2);
     push_type_name(L, -1, &ct);
-#if 1
     lua_pushfstring(L, "ctype<%s> %p", lua_tostring(L, -1), lua_topointer(L, 1));
-#else
-    lua_pushfstring(L, "ctype<%s> %p sz %d %d %d align %d %d ptr %d %d %d type %s %d %d %d name %d call %d %d var %d %d %d bit %d %d %d %d jit %d",
-            lua_tostring(L, -1),
-            lua_topointer(L, 1),
-            /* sz */
-            ct.base_size,
-            ct.array_size,
-            ct.offset,
-            /* align */
-            ct.align_mask,
-            ct.align_is_forced,
-            /* ptr */
-            ct.is_array,
-            ct.pointers,
-            ct.const_mask,
-            /* type */
-            etype_tostring(ct.type),
-            ct.is_reference,
-            ct.is_defined,
-            ct.is_null,
-            /* name */
-            ct.has_member_name,
-            /* call */
-            ct.calling_convention,
-            ct.has_var_arg,
-            /* var */
-            ct.is_variable_array,
-            ct.is_variable_struct,
-            ct.variable_size_known,
-            /* bit */
-            ct.is_bitfield,
-            ct.has_bitfield,
-            ct.bit_offset,
-            ct.bit_size,
-            /* jit */
-            ct.is_jitted);
-#endif
+
+    if (DEBUG_TOSTRING) {
+        print_type(L, &ct);
+        lua_concat(L, 2);
+    }
 
     return 1;
 }
@@ -2305,9 +2311,15 @@ static int cdata_tostring(lua_State* L)
         return ret;
     }
 
-    if (ct.pointers > 0) {
+    if (ct.pointers > 0 || ct.type == STRUCT_TYPE || ct.type == UNION_TYPE) {
         push_type_name(L, -1, &ct);
         lua_pushfstring(L, "cdata<%s>: %p", lua_tostring(L, -1), p);
+
+        if (DEBUG_TOSTRING) {
+            print_type(L, &ct);
+            lua_concat(L, 2);
+        }
+
         return 1;
     }
 
