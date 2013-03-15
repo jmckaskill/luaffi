@@ -466,7 +466,7 @@ static void* check_pointer(lua_State* L, int idx, struct ctype* ct)
         } else if (ct->type == STRUCT_TYPE || ct->type == UNION_TYPE) {
             return p;
         } else {
-            return (void*) check_intptr(L, idx, p, ct);
+            return (void*) (intptr_t) check_intptr(L, idx, p, ct);
         }
         break;
     }
