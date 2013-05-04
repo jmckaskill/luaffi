@@ -691,7 +691,7 @@ static void instantiate_typedef(struct parser* P, struct ctype* tt, const struct
     struct ctype pt = *tt;
     *tt = *ft;
 
-    tt->const_mask = pt.const_mask;
+    tt->const_mask |= pt.const_mask;
     tt->is_packed = pt.is_packed;
 
     if (tt->is_packed) {
