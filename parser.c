@@ -2113,7 +2113,7 @@ static int parse_root(lua_State* L, struct parser* P)
             }
 
             lua_rawset(L, -3);
-            lua_pop(L, 1); /*constants*/
+            lua_pop(L, 2); /*constants and type*/
 
         } else {
             /* type declaration, type definition, or function declaration */
