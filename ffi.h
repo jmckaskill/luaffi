@@ -50,6 +50,8 @@ extern "C" {
 #endif
 
 #ifdef _WIN32
+/* Change this to the appropriate value to target Windows XP or later.*/
+#define _WIN32_WINNT 0x0501
 #include <windows.h>
 #else
 #include <errno.h>
