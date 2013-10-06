@@ -818,5 +818,31 @@ assert(d[2] == 1)
 ffi.fill(d, 3)
 assert(d[2] == 0)
 
+-- tests for __new
+ffi.cdef[[
+struct newtest {
+    int a;
+    int b;
+    int c;
+};
+]]
+
+local tp = ffi.metatype("struct newtest", {__new =
+  function(tp, x, y, z)
+    tp = ffi.new(tp)
+    tp.a, tp.b, tp.c = x, y, z
+    return tp
+  end})
+local v = tp(1, 2, 3)
+assert(v.a == 1 and v.b == 2 and v.c == 3)
+
+local tp = ffi.metatype("struct newtest", {__new =
+  function(tp, x, y, z)
+    tp = ffi.new(tp, {a = x, b = y, c = z})
+    return tp
+  end})
+local v = tp(1, 2, 3)
+assert(v.a == 1 and v.b == 2 and v.c == 3)
+
 print('Test PASSED')
 
