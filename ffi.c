@@ -1138,6 +1138,33 @@ static int ffi_new(lua_State* L)
 static int ffi_cast(lua_State* L)
 { return do_new(L, 1); }
 
+static int ctype_new(lua_State* L)
+{ return do_new(L, 0); }
+
+static int ctype_call(lua_State* L)
+{
+    struct ctype ct;
+    int top = lua_gettop(L);
+
+    check_ctype(L, 1, &ct);
+
+    if (push_user_mt(L, -1, &ct)) {
+        lua_pushstring(L, "__new");
+        lua_rawget(L, -2);
+        if (!lua_isnil(L, -1)) {
+            lua_insert(L, 1); // function at bottom of stack under args
+            lua_pop(L, 2);
+            lua_call(L, top, 1);
+            return 1;
+        }
+        lua_pop(L, 2);
+    }
+    lua_pop(L, 1);
+
+    assert(lua_gettop(L) == top);
+    return do_new(L, 0);
+}
+
 static int ffi_sizeof(lua_State* L)
 {
     struct ctype ct;
@@ -1392,7 +1419,6 @@ int push_user_mt(lua_State* L, int ct_usr, const struct ctype* ct)
         lua_pop(L, 1);
         return 0;
     }
-
     return 1;
 }
 
@@ -1784,7 +1810,6 @@ static int call_user_op(lua_State* L, const char* opfield, int idx, int ct_usr, 
     if (push_user_mt(L, ct_usr, ct)) {
         lua_pushstring(L, opfield);
         lua_rawget(L, -2);
-
         if (!lua_isnil(L, -1)) {
             int top = lua_gettop(L);
             lua_pushvalue(L, idx);
@@ -1792,7 +1817,6 @@ static int call_user_op(lua_State* L, const char* opfield, int idx, int ct_usr, 
             return lua_gettop(L) - top + 1;
         }
     }
-
     return -1;
 }
 
@@ -2831,7 +2855,8 @@ static const luaL_Reg callback_mt[] = {
 };
 
 static const luaL_Reg ctype_mt[] = {
-    {"__call", &ffi_new},
+    {"__call", &ctype_call},
+    {"__new", &ctype_new},
     {"__tostring", &ctype_tostring},
     {NULL, NULL}
 };
