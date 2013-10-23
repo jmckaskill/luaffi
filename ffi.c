@@ -1924,6 +1924,40 @@ static int cdata_len(lua_State* L)
     return luaL_error(L, "type %s does not implement the __len metamethod", lua_tostring(L, -1));
 }
 
+static int cdata_pairs(lua_State* L)
+{
+    struct ctype ct;
+    int ret;
+
+    lua_settop(L, 1);
+    to_cdata(L, 1, &ct);
+
+    ret = call_user_op(L, "__pairs", 1, 2, &ct);
+    if (ret >= 0) {
+        return ret;
+    }
+
+    push_type_name(L, 2, &ct);
+    return luaL_error(L, "type %s does not implement the __pairs metamethod", lua_tostring(L, -1));
+}
+
+static int cdata_ipairs(lua_State* L)
+{
+    struct ctype ct;
+    int ret;
+
+    lua_settop(L, 1);
+    to_cdata(L, 1, &ct);
+
+    ret = call_user_op(L, "__ipairs", 1, 2, &ct);
+    if (ret >= 0) {
+        return ret;
+    }
+
+    push_type_name(L, 2, &ct);
+    return luaL_error(L, "type %s does not implement the __ipairs metamethod", lua_tostring(L, -1));
+}
+
 static int cdata_add(lua_State* L)
 {
     struct ctype lt, rt, ct;
@@ -2846,6 +2880,8 @@ static const luaL_Reg cdata_mt[] = {
     {"__tostring", &cdata_tostring},
     {"__concat", &cdata_concat},
     {"__len", &cdata_len},
+    {"__pairs", &cdata_pairs},
+    {"__ipairs", &cdata_ipairs},
     {NULL, NULL}
 };
 
