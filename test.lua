@@ -854,5 +854,18 @@ assert(x == 1 and y == 2)
 x, y = ipairs(v)
 assert(x == 2 and y == 3)
 
+-- test for pointer to struct having same metamethods
+local st = ffi.cdef "struct ptest {int a, b;};"
+local tp = ffi.metatype("struct ptest", {__index = function(s, k) return k end, __len = function(s) return 3 end})
+
+local a = tp(1, 2)
+assert(a.banana == "banana")
+assert(#a == 3)
+local b = ffi.new("int[2]")
+local c = ffi.cast("struct ptest *", b)
+assert(c.banana == "banana") -- should have same methods
+assert(#c == 3)
+
+
 print('Test PASSED')
 
