@@ -179,7 +179,7 @@ static char* luaL_prepbuffsize(luaL_Buffer* B, size_t sz) {
 #else
 #   define LIB_FORMAT_1 "%s.so"
 #   define LIB_FORMAT_2 "lib%s.so"
-#   define LoadLibraryA(name) dlopen(name, RTLD_NOW | RTLD_GLOBAL)
+#   define LoadLibraryA(name) dlopen(name, RTLD_LAZY | RTLD_GLOBAL)
 #   define GetProcAddressA(lib, name) dlsym(lib, name)
 #   define AllocPage(size) mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANON, -1, 0)
 #   define FreePage(data, size) munmap(data, size)
