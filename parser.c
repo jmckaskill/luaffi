@@ -350,7 +350,7 @@ static void calculate_member_position(lua_State* L, struct parser* P, struct cty
          * before the first bitfield. :0 finishes up the storage unit using
          * the greater alignment of the storage unit or the type used with the
          * :0. This is equivalent to the :0 always creating a new storage
-         * unit, but not necesserily using it yet.
+         * unit, but not necessarily using it yet.
          */
 
         if (*pbitfield_type == -1 && mt->bit_size == 0) {
